@@ -1,106 +1,81 @@
 package documents
 
 import (
-	"archive/zip"
 	"bytes"
-	"encoding/xml"
-	"fmt"
 	"io"
-	"strings"
 
-	"github.com/gomutex/godocx"
+	"github.com/Emmanuella-codes/burnished-microservice/pkg/utils"
+	"github.com/unidoc/unioffice/document"
 )
 
-type DocxProcessor struct{}
+type DOCXProcessor struct {
+	templatePath string
+}
 
-func (p *DocxProcessor) Extract(filePath string) (string, error) {
-	// open the docx file 
-	r, err := zip.OpenReader(filePath)
+func NewDOCXProcessor(templatePath string) (*DOCXProcessor, error) {
+	return &DOCXProcessor{
+		templatePath: templatePath,
+	}, nil
+}
+
+func (p *DOCXProcessor) ExtractText(file io.Reader) (string, error) {
+	// read the entire file
+	fileBytes, err := io.ReadAll(file)
 	if err != nil {
-		return "", fmt.Errorf("failed to open docx file: %v", err)
+		return "", err
 	}
-	defer r.Close()
 
-	// find document.xml in the archive
-	var documentFile *zip.File
-	for _, f := range r.File {
-		if f.Name == "word/document.xml" {
-			documentFile = f
-			break
+	// Create a bytes.Reader from the byte slice
+	reader := bytes.NewReader(fileBytes)
+
+	// open the DOCX file
+	doc, err := document.Read(reader, reader.Size())
+	if err != nil {
+		return "", err
+	}
+
+	var text string
+	// extract text from paragraphs
+	for _, para := range doc.Paragraphs() {
+		for _, run := range para.Runs() {
+			text += run.Text()
 		}
+		text += "\n"
 	}
 
-	if documentFile == nil {
-		return "", fmt.Errorf("document.xml not found in docx file")
-	}
-
-	// read document.xml
-	documentReader, err := documentFile.Open()
-	if err != nil {
-		return "", fmt.Errorf("failed to open document.xml: %v", err)
-	}
-	defer documentReader.Close()
-
-	documentBytes, err := io.ReadAll(documentReader)
-	if err != nil {
-		return "", fmt.Errorf("failed to read document.xml: %v", err)
-	}
-
-	// extract text from xml
-	text, err := extractTextFromDocumentXML(documentBytes)
-	if err != nil {
-		return "", fmt.Errorf("failed to extract text from document.xml: %v", err)
-	}
 	return text, nil
 }
 
-func (p *DocxProcessor) Create(content string, outputPath string) (string, error) {
-	doc, err := godocx.NewDocument()
+func (p *DOCXProcessor) CreateFormattedDocument(content string) ([]byte, error) {
+	// load the template
+	doc, err := document.Open(p.templatePath)
 	if err != nil {
-		return "", fmt.Errorf("failed to create document: %v", err)
-	}
-	defer doc.Close()
-
-	doc.AddParagraph(content)
-	// save document to specified output path
-	if err = doc.Save(); err != nil {
-		return "", fmt.Errorf("failed to save document: %v", err)
-	}
-
-	
-	return outputPath, nil
-}
-
-func extractTextFromDocumentXML(documentBytes []byte) (string, error) {
-	type Text struct {
-		XMLName xml.Name `xml:"t"`
-		Content string 	 `xml:",chardata"`
-	}
-
-	var buf bytes.Buffer
-	decoder := xml.NewDecoder(bytes.NewReader(documentBytes))
-
-	for {
-		token, err := decoder.Token()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return "", err
+		// create a new document if the template doesn't exist
+		doc = document.New()
+		para := doc.AddParagraph()
+		run := para.AddRun()
+		run.AddText(content)
+	} else {
+		// clear the template and add the new document
+		for i := len(doc.Paragraphs()) - 1; i >= 0; i-- {
+			doc.RemoveParagraph(doc.Paragraphs()[i])
 		}
 
-		switch se := token.(type) {
-		case xml.StartElement:
-			if se.Name.Local == "t" {
-				var text Text
-				if err := decoder.DecodeElement(&text, &se); err != nil {
-					return "", err
-				}
-				buf.WriteString(text.Content)
-				buf.WriteString(" ")
-			}
+		// split content by new lines and paragraph
+		lines := utils.SplitLines(content)
+		for _, line := range lines {
+			para := doc.AddParagraph()
+			run := para.AddRun()
+			run.AddText(line)
 		}
 	}
 
-	return strings.TrimSpace(buf.String()), nil
+	// save the document to a byte array
+	buf := new(bytes.Buffer)
+	err = doc.Save(buf)
+	if err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
 }

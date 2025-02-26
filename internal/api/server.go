@@ -4,14 +4,21 @@ import (
 	"net/http"
 
 	"github.com/Emmanuella-codes/burnished-microservice/internal/config"
+	"github.com/Emmanuella-codes/burnished-microservice/internal/documents"
+
+	"github.com/gin-gonic/gin"
 )
 
 type Server struct {
 	cfg 		*config.Config
-	router 	*http.ServeMux
+	router 	*gin.Engine
+	server 	*http.Server
+	docProc *documents.Processor
 }
 
 func NewServer(cfg *config.Config) *Server {
+	router := gin.Default()
+	processor := documents.
 	s := &Server{
 		cfg: cfg,
 		router: http.NewServeMux(),
