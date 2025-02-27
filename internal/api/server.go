@@ -1,7 +1,13 @@
 package api
 
 import (
+	"context"
+	"fmt"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/Emmanuella-codes/burnished-microservice/internal/config"
 	"github.com/Emmanuella-codes/burnished-microservice/internal/documents"
@@ -18,24 +24,44 @@ type Server struct {
 
 func NewServer(cfg *config.Config) *Server {
 	router := gin.Default()
-	processor := documents.
+	processor := documents.NewProcessor(cfg)
 	s := &Server{
 		cfg: cfg,
-		router: http.NewServeMux(),
+		router: router,
+		docProc: processor,
+		server: &http.Server{
+			Addr: 	 ":" + cfg.Port,
+			Handler: router,
+		},
 	}
-	
+	s.setupRoutes()
+	return s
 }
 
 func (s *Server) setupRoutes() {
-	s.router.HandleFunc("/health", s.healthHandler)
-	s.router.HandleFunc("/process-cv", s.processCVHandler)
-	s.router.HandleFunc("/format-cv", s.formatCVHandler)
-	s.router.HandleFunc("/roast-cv", s.roastCVHandler)
-	s.router.HandleFunc("/generate-cover-letter", s.generateCoverLetterHandler)
+	api := s.router.Group("/api/v1")
+	{
+		api.GET("/health", s.healthHandler)
+		api.POST("/process-cv", s.processCVHandler)
+		api.POST("/format-cv", s.formatCVHandler)
+		api.POST("/roast-cv", s.roastCVHandler)
+		api.POST("/generate-cover-letter", s.generateCoverLetterHandler)
+	}
 }
 
 func (s *Server) Start() error {
-	server := &http.Server{
-		
-	}
+	// setup shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-quit
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.server.Shutdown(ctx); err != nil {
+			fmt.Printf("Server forced to shutdown: %v\n", err)
+		}
+	}()
+
+	return s.server.ListenAndServe()
 }
