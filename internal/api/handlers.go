@@ -1,125 +1,177 @@
 package api
 
 import (
-	"encoding/json"
+	"bytes"
+	"context"
+
+	// "encoding/json"
+	"fmt"
 	"io"
-	"log"
 	"net/http"
-	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
-	"github.com/Emmanuella-codes/burnished-microservice/internal/documents"
+	"cloud.google.com/go/storage"
+
+	"github.com/Emmanuella-codes/burnished-microservice/internal/ai"
+	// "github.com/Emmanuella-codes/burnished-microservice/internal/documents"
+	"github.com/google/uuid"
+
+	"github.com/gin-gonic/gin"
 )
 
-func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	response := map[string]string{
-		"status": "ok",
-		"time": 	time.Now().Format(time.RFC3339),
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+type ProcessCVRequest struct {
+	Format				 			 string `json:"format" binding:"required,oneof=ats roast"`
+	JobDescription 			 string `json:"jobDescription,omitempty"`
+	GenerateCoverLetter  bool 	`json:"generateCoverLetter"`
 }
 
-func (s *Server) processCVHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+type ProcessResponse struct {
+	Success 		bool 		`json:"success"`
+	Message 		string	`json:"message,omitempty"`
+	FileURL 		string	`json:"fileUrl,omitempty"`
+	CoverLetter string	`json:"coverLetter,omitempty"`
+	Feedback 		string	`json:"feedback,omitempty"`
+}
 
-	// parse multipart form
-	if err := r.ParseMultipartForm(s.cfg.MaxFileSize); err != nil {
-		http.Error(w, "Failed to parse form", http.StatusBadRequest)
-		return
-	}
-
-	// get the file from the request
-	file, header, err := r.FormFile("cv")
+func (s *Server) saveToGCS(fileData []byte, filename string) (string, error) {
+	ctx := context.Background()
+	// create a GCS client
+	client, err := storage.NewClient(ctx)
 	if err != nil {
-		http.Error(w, "No file provided", http.StatusBadRequest)
+		return "", fmt.Errorf("fsiled to create storage client: %v", err)
+	}
+	defer client.Close()
+	
+	// replace with bucket name
+	bucketName := s.cfg.StorageBucket
+
+	// create a bucket handle
+	bucket := client.Bucket(bucketName)
+
+	// create an object handle
+	obj := bucket.Object(filename)
+
+	// create a writer
+	w := obj.NewWriter(ctx)
+
+	// set cache control and content type
+  w.CacheControl = "public, max-age=86400"
+
+	// detect content type based on file extension
+	contentType := "application/octet-stream"
+	switch filepath.Ext(filename) {
+	case ".pdf":
+			contentType = "application/pdf"
+	case ".docx":
+			contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	case ".txt":
+			contentType = "text/plain"
+	}
+	w.ContentType = contentType
+
+	// write the data
+	if _, err := w.Write(fileData); err != nil {
+		return "", fmt.Errorf("failed to write to object: %v", err)
+	}
+
+	// close the writer
+	if err := w.Close(); err != nil {
+			return "", fmt.Errorf("failed to close writer: %v", err)
+	}
+
+	// make the object publicly accessible
+	if err := obj.ACL().Set(ctx, storage.AllUsers, storage.RoleReader); err != nil {
+		return "", fmt.Errorf("failed to set object ACL: %v", err)
+	}
+
+	// generate a public URL for the object
+	fileURL := fmt.Sprintf("https://storage.googleapis.com/%s/%s", bucketName, filename)
+
+	return fileURL, nil
+}
+
+func (s *Server) healthHandler(c *gin.Context) {
+	response := gin.H{
+		"status": "ok",
+		"time":		time.Now().Format(time.RFC3339),
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+func (s *Server) processCVHandler(c *gin.Context) {
+	var req ProcessCVRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	file, header, err := c.Request.FormFile("cv")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No CV file provided"})
 		return
 	}
 	defer file.Close()
 
-	// generate a temporary filename
-	fileExt := strings.ToLower(filepath.Ext(header.Filename))
-	tempFile := filepath.Join(s.cfg.TempDir, "cv_"+time.Now().Format("20060102150405")+fileExt)
-
-	// validate file extension
-	if fileExt != ".pdf" && fileExt != ".docx" {
-		http.Error(w, "Unsupported file format. Please upload PDF or DOCX", http.StatusBadRequest)
+	// check the file size
+	if header.Size > s.cfg.MaxFileSize {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "File is too large"})
 		return
 	}
 
-	// save the uploaded file
-	dst, err := os.Create(tempFile)
+	// Read the file
+	fileData, err := io.ReadAll(file)
 	if err != nil {
-		http.Error(w, "Failed to save file", http.StatusInternalServerError)
-		log.Printf("Error creating temp file: %v", err)
-		return
-	}
-	defer dst.Close()
-
-	if _, err := io.Copy(dst, file); err != nil {
-		http.Error(w, "Failed to save file", http.StatusInternalServerError)
-		log.Printf("Error copying file: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file"})
 		return
 	}
 
-	// extract cv content
-	var processor documents.Processor
-	if fileExt == ".pdf" {
-		processor = &documents.DocxProcessor{}
-	} else {
-		processor = &documents.PDFProcessor{}
+	ext := filepath.Ext(header.Filename)
+	response := ProcessResponse{Success: true}
+
+	fileReader := bytes.NewReader(fileData)
+
+	switch req.Format {
+	case "ats":
+		processedFile, err := s.docProc.FormatForATS(fileReader, ext, req.JobDescription)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process CV"})
+			return
+		}
+
+		// generate a unique filename
+		filename := fmt.Sprintf("%s-%s%s", uuid.New().String(), "optimized", ext)
+		
+		// save to gcs
+		fileUrl, err := s.saveToGCS(processedFile, filename)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save processed file"})
+			return
 	}
+	
+	response.FileURL = fileUrl
 
-	content, err := processor.Extract(tempFile)
-	if err != nil {
-		http.Error(w, "Failed to extract content from file", http.StatusInternalServerError)
-		log.Printf("Error extracting content: %v", err)
-		return
+		// generate cover letter
+		if req.GenerateCoverLetter && req.JobDescription != "" {
+			coverLetter, err := ai.GenerateCoverLetter(fileData, req.JobDescription, s.cfg.GeminiAPIKey)
+			if err == nil {
+				response.CoverLetter = coverLetter
+
+				//save the cover letter as a document
+				// if coverLetter != "" {
+				// 	clFilename := fmt.Sprintf("%s-%s.pdf", uuid.New().String(), "coverletter")
+				// 	coverLetterDoc, err := documents.DocumentProcessor.CreateFormattedDocument(coverLetter)
+				// }
+			}
+		}
+	case "roast":
+		feedback, err := s.docProc.RoastCV(fileReader, ext)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to roast CV"})
+			return
+		}
+		response.Feedback = feedback
 	}
-
-	// extracted content
-	response := map[string]string{
-		"content": content,
-		"file": 	 tempFile,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
-}
-
-func (s *Server) formatCVHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req struct {
-		CVContent 		 string `json:"cvContent"`
-		JobDescription string `json:"jobDescription"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	// formatter := 
-
-	response := map[string]string{
-		"formattedCV": 
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	c.JSON(http.StatusOK, response)
 }

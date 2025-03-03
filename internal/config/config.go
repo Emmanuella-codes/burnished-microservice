@@ -12,6 +12,7 @@ type Config struct {
 	DocxTemplate  string
 	PdfTemplate   string
 	MaxFileSize   int64
+	StorageBucket string
 }
 
 func Load() (*Config, error) {
