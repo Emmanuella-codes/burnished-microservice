@@ -175,3 +175,54 @@ func (s *Server) processCVHandler(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, response)
 }
+
+func (s *Server) formatCVHandler(c *gin.Context) {
+	file, header, err := c.Request.FormFile("cv")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No CV file provided"})
+		return
+	}
+	defer file.Close()
+
+	jobDesc := c.PostForm("jobDescription")
+	ext := filepath.Ext(header.Filename)
+
+	processedFile, err := s.docProc.FormatForATS(file, ext, jobDesc)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to format CV"})
+		return
+	}
+
+	// set appropriate headers for file download
+	c.Header("Content-Disposition", "attachment; filename=formatted_cv"+ext)
+	c.Data(http.StatusOK, getContentType(ext), processedFile)
+}
+
+func (s *Server) roastCVHandler(c *gin.Context) {
+	file, header, err := c.Request.FormFile("cv")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No CV file provided"})
+		return
+	}
+	defer file.Close()
+
+	ext := filepath.Ext(header.Filename)
+	feedback, err := s.docProc.RoastCV(file, ext)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to roast CV"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"feedback": feedback})
+}
+
+func getContentType(ext string) string {
+	switch ext {
+	case ".pdf":
+		return "application/pdf"
+	case ".docx":
+		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	default:
+		return "application/octet-stream"
+	}
+}
