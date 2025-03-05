@@ -216,6 +216,35 @@ func (s *Server) roastCVHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"feedback": feedback})
 }
 
+func (s *Server) generateCoverLetterHandler(c *gin.Context) {
+	file, _, err := c.Request.FormFile("cv")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No CV file provided"})
+		return
+	}
+	defer file.Close()
+
+	jobDesc := c.PostForm("jobDescription")
+	if jobDesc == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Job description is required"})
+		return
+	}
+
+	fileData, err := io.ReadAll(file)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file"})
+		return
+	}
+
+	coverLetter, err := ai.GenerateCoverLetter(fileData, jobDesc, s.cfg.GeminiAPIKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate cover letter"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"coverLetter": coverLetter})
+}
+
 func getContentType(ext string) string {
 	switch ext {
 	case ".pdf":
