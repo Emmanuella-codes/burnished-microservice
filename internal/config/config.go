@@ -45,11 +45,17 @@ func Load() (*Config, error) {
 		}
 	}
 
+	storageBucket := os.Getenv("STORAGE_BUCKET")
+	if storageBucket == "" {
+		return nil, fmt.Errorf("STORAGE_BUCKET environment variable is required")
+	}
+
 	return &Config{
-		Port: 				port,
-		GeminiAPIKey: geminiAPIKey,
-		DocxTemplate: docxTemplate,
-		PdfTemplate: 	pdfTemplate,
-		MaxFileSize: 	maxFileSize,
+		Port: 				 port,
+		GeminiAPIKey:  geminiAPIKey,
+		DocxTemplate:  docxTemplate,
+		PdfTemplate: 	 pdfTemplate,
+		MaxFileSize: 	 maxFileSize,
+		StorageBucket: storageBucket,
 	}, nil
 }
