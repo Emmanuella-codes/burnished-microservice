@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Emmanuella-codes/burnished-microservice/internal/api/middlewares"
 	"github.com/Emmanuella-codes/burnished-microservice/internal/config"
 	"github.com/Emmanuella-codes/burnished-microservice/internal/documents"
 
@@ -40,6 +41,7 @@ func NewServer(cfg *config.Config) *Server {
 
 func (s *Server) setupRoutes() {
 	api := s.router.Group("/api/v1")
+	api.Use(middlewares.LoggingMiddleware())
 	{
 		api.GET("/health", s.healthHandler)
 		api.POST("/process-cv", s.processCVHandler)
