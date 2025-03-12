@@ -3,8 +3,8 @@ package api
 import (
 	"bytes"
 	"context"
+	"log"
 
-	// "encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,7 +14,6 @@ import (
 	"cloud.google.com/go/storage"
 
 	"github.com/Emmanuella-codes/burnished-microservice/internal/ai"
-	// "github.com/Emmanuella-codes/burnished-microservice/internal/documents"
 	"github.com/google/uuid"
 
 	"github.com/gin-gonic/gin"
@@ -101,11 +100,12 @@ func (s *Server) healthHandler(c *gin.Context) {
 }
 
 func (s *Server) processCVHandler(c *gin.Context) {
-	var req ProcessCVRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	req, exists := c.Get("requestBody")
+	if !exists {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing request body"})
 		return
 	}
+	processReq := req.(ProcessCVRequest)
 
 	file, header, err := c.Request.FormFile("cv")
 	if err != nil {
@@ -116,25 +116,31 @@ func (s *Server) processCVHandler(c *gin.Context) {
 
 	// check the file size
 	if header.Size > s.cfg.MaxFileSize {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "File is too large"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("File size exceeds limit: %d bytes", s.cfg.MaxFileSize)})
 		return
 	}
 
-	// Read the file
+	// validate file type
+	ext := filepath.Ext(header.Filename)
+	if ext != ".pdf" && ext != ".docx" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unsupported file type. Only PDF and DOCX are allowed"})
+		return
+	}
+
+	// read the file
 	fileData, err := io.ReadAll(file)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file"})
 		return
 	}
 
-	ext := filepath.Ext(header.Filename)
 	response := ProcessResponse{Success: true}
 
 	fileReader := bytes.NewReader(fileData)
 
-	switch req.Format {
+	switch processReq.Format {
 	case "ats":
-		processedFile, err := s.docProc.FormatForATS(fileReader, ext, req.JobDescription)
+		processedFile, err := s.docProc.FormatForATS(fileReader, ext, processReq.JobDescription)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process CV"})
 			return
@@ -153,16 +159,17 @@ func (s *Server) processCVHandler(c *gin.Context) {
 	response.FileURL = fileUrl
 
 		// generate cover letter
-		if req.GenerateCoverLetter && req.JobDescription != "" {
-			coverLetter, err := ai.GenerateCoverLetter(fileData, req.JobDescription, s.cfg.GeminiAPIKey)
-			if err == nil {
-				response.CoverLetter = coverLetter
-
+		if processReq.GenerateCoverLetter && processReq.JobDescription != "" {
+			coverLetter, err := ai.GenerateCoverLetter(fileData, processReq.JobDescription, s.cfg.GeminiAPIKey)
+			if err != nil {
+				log.Printf("Failed to generate cover letter: %v", err)
 				//save the cover letter as a document
 				// if coverLetter != "" {
 				// 	clFilename := fmt.Sprintf("%s-%s.pdf", uuid.New().String(), "coverletter")
 				// 	coverLetterDoc, err := documents.DocumentProcessor.CreateFormattedDocument(coverLetter)
 				// }
+			} else {
+				response.CoverLetter = coverLetter
 			}
 		}
 	case "roast":
