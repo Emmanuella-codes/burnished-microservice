@@ -42,6 +42,7 @@ func (s *Server) setupRoutes() {
 	api := s.router.Group("/api/v1")
 	api.Use(loggingMiddleware())
 	api.Use(validateRequestMiddleware())
+	api.Use(rateLimitMiddleware())
 	{
 		api.GET("/health", s.healthHandler)
 		api.POST("/process-cv", s.processCVHandler)
