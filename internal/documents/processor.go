@@ -26,31 +26,31 @@ func (p *Processor) FormatForATS(file io.Reader, fileExt, jobDesc string) ([]byt
 	case ".pdf":
 		processor, err = NewPDFProcessor(p.config.PdfTemplate)
 	case ".docx":
-		processor, err = NewPDFProcessor(p.config.DocxTemplate)
+		processor, err = NewDOCXProcessor(p.config.DocxTemplate)
 	default:
 		return nil, fmt.Errorf("unsupported file format: %s", fileExt)
 	}
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("initializing processor for %s: %w", fileExt, err)
 	}
 
 	// extract text from cv
 	text, err := processor.ExtractText(file)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("extracting text from %s: %w", fileExt, err)
 	}
 
 	// use AI to optimize the CV content
 	optimizedText, err := ai.FormatForATS(text, jobDesc, p.config.GeminiAPIKey)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("optimizing CV for ATS: %w", err)
 	}
 
 	// create a new document with the optimized content
 	formattedDoc, err := processor.CreateFormattedDocument(optimizedText)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("creating formatted %s document: %w", fileExt, err)
 	}
 
 	return formattedDoc, nil
@@ -70,19 +70,19 @@ func (p *Processor) RoastCV(file io.Reader, fileExt string) (string, error) {
 	}
 
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("initializing processor for %s: %w", fileExt, err)
 	}
 
 	// extract text from cv
 	text, err := processor.ExtractText(file)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("extracting text from %s: %w", fileExt, err)
 	}
 
 	// use AI to critique the CV
 	feedback, err := ai.RoastCV(text, p.config.GeminiAPIKey)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("roasting CV: %w", err)
 	}
 
 	return feedback, nil

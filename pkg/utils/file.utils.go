@@ -18,6 +18,11 @@ func GeneratePDF(content, templatePath string) ([]byte, error) {
 		pdf.MultiCell(0, 10, line, "0", "L", false)
 	}
 
+	// Check for PDF errors before output
+	if err := pdf.Error(); err != nil {
+		return nil, err
+	}
+
 	var buf bytes.Buffer
 	err := pdf.Output(&buf)
 	if err != nil {

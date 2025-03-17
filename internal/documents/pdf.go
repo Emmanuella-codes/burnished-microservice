@@ -2,11 +2,12 @@ package documents
 
 import (
 	"bytes"
-	// "fmt"
+	"fmt"
 	"io"
 	// "os/exec"
 	"strings"
 
+	"github.com/unidoc/unioffice/document"
 	"github.com/unidoc/unipdf/v3/creator"
 	"github.com/unidoc/unipdf/v3/extractor"
 	"github.com/unidoc/unipdf/v3/model"
@@ -17,6 +18,14 @@ type PDFProcessor struct {
 }
 
 func NewPDFProcessor(templatePath string) (*PDFProcessor, error) {
+	if templatePath != "" {
+		// Validate template existence (optional, could log instead).
+		doc, err := document.Open(templatePath)
+		if err != nil {
+				return nil, fmt.Errorf("invalid template path %s: %w", templatePath, err)
+		}
+		doc.Close() // Close since we’re just validating.
+}
 	return &PDFProcessor{
 		templatePath: templatePath,
 	}, nil
@@ -25,35 +34,35 @@ func NewPDFProcessor(templatePath string) (*PDFProcessor, error) {
 func (p *PDFProcessor) ExtractText(file io.Reader) (string, error) {
 	fileBytes, err := io.ReadAll(file)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("reading PDF file: %w", err)
 	}
 
 	// create a reader for the PDF
 	pdfReader, err := model.NewPdfReader(bytes.NewReader(fileBytes))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("parsing PDF: %w", err)
 	}
 
 	numPages, err := pdfReader.GetNumPages()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("getting page count: %w", err)
 	}
 
 	var allText string
 	for i := 1; i <= numPages; i++ {
 		page, err := pdfReader.GetPage(i)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("getting page %d: %w", i, err)
 		}
 
 		ex, err := extractor.New(page)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("creating extractor for page %d: %w", i, err)
 		}
 
 		text, err := ex.ExtractText()
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("extracting text from page %d: %w", i, err)
 		}
 
 		allText += text + "\n"
@@ -87,7 +96,7 @@ func (p *PDFProcessor) CreateFormattedDocument(content string) ([]byte, error) {
 		// add the paragraph to the creator
 		err := creator.Draw(p)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("drawing paragraph: %w", err)
 		}
 	}
 

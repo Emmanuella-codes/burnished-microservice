@@ -2,7 +2,9 @@ package documents
 
 import (
 	"bytes"
+	"fmt"
 	"io"
+	"strings"
 
 	"github.com/Emmanuella-codes/burnished-microservice/pkg/utils"
 	"github.com/unidoc/unioffice/document"
@@ -13,6 +15,13 @@ type DOCXProcessor struct {
 }
 
 func NewDOCXProcessor(templatePath string) (*DOCXProcessor, error) {
+	if templatePath != "" {
+		doc, err := document.Open(templatePath)
+		if err != nil {
+			return nil, fmt.Errorf("invalid template path %s: %w", templatePath, err)
+		}
+		doc.Close()
+	}
 	return &DOCXProcessor{
 		templatePath: templatePath,
 	}, nil
@@ -22,7 +31,7 @@ func (p *DOCXProcessor) ExtractText(file io.Reader) (string, error) {
 	// read the entire file
 	fileBytes, err := io.ReadAll(file)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("reading DOCX file: %w", err)
 	}
 
 	// Create a bytes.Reader from the byte slice
@@ -31,8 +40,9 @@ func (p *DOCXProcessor) ExtractText(file io.Reader) (string, error) {
 	// open the DOCX file
 	doc, err := document.Read(reader, reader.Size())
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("parsing DOCX: %w", err)
 	}
+	defer doc.Close()
 
 	var text string
 	// extract text from paragraphs
@@ -64,9 +74,11 @@ func (p *DOCXProcessor) CreateFormattedDocument(content string) ([]byte, error) 
 		// split content by new lines and paragraph
 		lines := utils.SplitLines(content)
 		for _, line := range lines {
-			para := doc.AddParagraph()
-			run := para.AddRun()
-			run.AddText(line)
+			if line = strings.TrimSpace(line); line != "" {
+				para := doc.AddParagraph()
+				run := para.AddRun()
+				run.AddText(line)
+			}
 		}
 	}
 
