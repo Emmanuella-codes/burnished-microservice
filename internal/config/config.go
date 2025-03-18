@@ -16,46 +16,45 @@ type Config struct {
 }
 
 func Load() (*Config, error) {
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
+	cfg := &Config{
+		Port:         "8080",                  
+		MaxFileSize:  10 * 1024 * 1024, // Default: 10MB.
+		DocxTemplate: "./templates/cv_template.docx", 
+		PdfTemplate:  "./templates/cv_template.pdf",
+	}
+	
+	if port := os.Getenv("PORT"); port != "" {
+		cfg.Port = port
 	}
 
-	geminiAPIKey := os.Getenv("GEMINI_API_KEY")
-	if geminiAPIKey == "" {
+	cfg.GeminiAPIKey = os.Getenv("GEMINI_API_KEY")
+	if cfg.GeminiAPIKey == "" {
 		return nil, fmt.Errorf("GEMINI_API_KEY environment variable is required")
 	}
 
-	docxTemplate := os.Getenv("DOCX_TEMPLATE")
-	if docxTemplate == "" {
-		docxTemplate = "./templates/cv_template.docx"
+	if docxTemplate := os.Getenv("DOCX_TEMPLATE"); docxTemplate != "" {
+		cfg.DocxTemplate = docxTemplate
 	}
 
-	pdfTemplate := os.Getenv("PDF_TEMPLATE")
-	if docxTemplate == "" {
-		docxTemplate = "./templates/cv_template.pdf"
+	if pdfTemplate := os.Getenv("PDF_TEMPLATE"); pdfTemplate != "" {
+		cfg.PdfTemplate = pdfTemplate
 	}
 
-	maxFileSizeStr := os.Getenv("MAX_FILE_SIZE")
-	maxFileSize := int64(10 * 1024 * 1024)
-	if maxFileSizeStr != "" {
+	if maxFileSizeStr := os.Getenv("MAX_FILE_SIZE"); maxFileSizeStr != "" {
 		size, err := strconv.ParseInt(maxFileSizeStr, 10, 64)
-		if err == nil {
-			maxFileSize = size
+		if err != nil {
+				return nil, fmt.Errorf("invalid MAX_FILE_SIZE value %q: %w", maxFileSizeStr, err)
 		}
+		if size <= 0 {
+				return nil, fmt.Errorf("MAX_FILE_SIZE must be positive, got %d", size)
+		}
+		cfg.MaxFileSize = size
 	}
 
-	storageBucket := os.Getenv("STORAGE_BUCKET")
-	if storageBucket == "" {
-		return nil, fmt.Errorf("STORAGE_BUCKET environment variable is required")
-	}
+	cfg.StorageBucket = os.Getenv("STORAGE_BUCKET")
+    if cfg.StorageBucket == "" {
+        return nil, fmt.Errorf("environment variable STORAGE_BUCKET is required")
+    }
 
-	return &Config{
-		Port: 				 port,
-		GeminiAPIKey:  geminiAPIKey,
-		DocxTemplate:  docxTemplate,
-		PdfTemplate: 	 pdfTemplate,
-		MaxFileSize: 	 maxFileSize,
-		StorageBucket: storageBucket,
-	}, nil
+	return cfg, nil
 }
