@@ -34,11 +34,12 @@ type ProcessResponse struct {
 }
 
 func (s *Server) saveToGCS(fileData []byte, filename string) (string, error) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+  defer cancel()
 	// create a GCS client
 	client, err := storage.NewClient(ctx)
 	if err != nil {
-		return "", fmt.Errorf("fsiled to create storage client: %v", err)
+		return "", fmt.Errorf("failed to create storage client: %w", err)
 	}
 	defer client.Close()
 	
@@ -54,40 +55,22 @@ func (s *Server) saveToGCS(fileData []byte, filename string) (string, error) {
 	// create a writer
 	w := obj.NewWriter(ctx)
 
-	// set cache control and content type
-  w.CacheControl = "public, max-age=86400"
+	w.ContentType = getContentType(filepath.Ext(filename))
+	w.CacheControl = "public, max-age=86400"
 
-	// detect content type based on file extension
-	contentType := "application/octet-stream"
-	switch filepath.Ext(filename) {
-	case ".pdf":
-			contentType = "application/pdf"
-	case ".docx":
-			contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-	case ".txt":
-			contentType = "text/plain"
-	}
-	w.ContentType = contentType
-
-	// write the data
 	if _, err := w.Write(fileData); err != nil {
-		return "", fmt.Errorf("failed to write to object: %v", err)
+			return "", fmt.Errorf("writing to GCS: %w", err)
 	}
-
-	// close the writer
 	if err := w.Close(); err != nil {
-			return "", fmt.Errorf("failed to close writer: %v", err)
+			return "", fmt.Errorf("closing GCS writer: %w", err)
 	}
 
-	// make the object publicly accessible
+	// make the object publicly accessible.
 	if err := obj.ACL().Set(ctx, storage.AllUsers, storage.RoleReader); err != nil {
-		return "", fmt.Errorf("failed to set object ACL: %v", err)
+		return "", fmt.Errorf("setting GCS ACL: %w", err)
 	}
 
-	// generate a public URL for the object
-	fileURL := fmt.Sprintf("https://storage.googleapis.com/%s/%s", bucketName, filename)
-
-	return fileURL, nil
+	return fmt.Sprintf("https://storage.googleapis.com/%s/%s", s.cfg.StorageBucket, filename), nil
 }
 
 func (s *Server) healthHandler(c *gin.Context) {
@@ -100,12 +83,11 @@ func (s *Server) healthHandler(c *gin.Context) {
 }
 
 func (s *Server) processCVHandler(c *gin.Context) {
-	req, exists := c.Get("requestBody")
-	if !exists {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing request body"})
-		return
+	var req ProcessCVRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+			return
 	}
-	processReq := req.(ProcessCVRequest)
 
 	file, header, err := c.Request.FormFile("cv")
 	if err != nil {
@@ -138,39 +120,33 @@ func (s *Server) processCVHandler(c *gin.Context) {
 
 	fileReader := bytes.NewReader(fileData)
 
-	switch processReq.Format {
+	switch req.Format {
 	case "ats":
-		processedFile, err := s.docProc.FormatForATS(fileReader, ext, processReq.JobDescription)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process CV"})
+		if req.JobDescription == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Job description required for ATS formatting"})
 			return
 		}
-
-		// generate a unique filename
-		filename := fmt.Sprintf("%s-%s%s", uuid.New().String(), "optimized", ext)
-		
-		// save to gcs
-		fileUrl, err := s.saveToGCS(processedFile, filename)
+		processedFile, err := s.docProc.FormatForATS(fileReader, ext, req.JobDescription)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save processed file"})
-			return
-	}
-	
-	response.FileURL = fileUrl
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process CV: " + err.Error()})
+				return
+		}
 
-		// generate cover letter
-		if processReq.GenerateCoverLetter && processReq.JobDescription != "" {
-			coverLetter, err := ai.GenerateCoverLetter(fileData, processReq.JobDescription, s.cfg.GeminiAPIKey)
-			if err != nil {
-				log.Printf("Failed to generate cover letter: %v", err)
-				//save the cover letter as a document
-				// if coverLetter != "" {
-				// 	clFilename := fmt.Sprintf("%s-%s.pdf", uuid.New().String(), "coverletter")
-				// 	coverLetterDoc, err := documents.DocumentProcessor.CreateFormattedDocument(coverLetter)
-				// }
-			} else {
-				response.CoverLetter = coverLetter
-			}
+		filename := fmt.Sprintf("cv_%s_optimized%s", uuid.New().String(), ext)
+		fileURL, err := s.saveToGCS(processedFile, filename)
+		if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save processed file: " + err.Error()})
+				return
+		}
+		response.FileURL = fileURL
+
+		if req.GenerateCoverLetter {
+				coverLetter, err := ai.GenerateCoverLetter(fileData, req.JobDescription, s.cfg.GeminiAPIKey)
+				if err != nil {
+						log.Printf("Failed to generate cover letter: %v", err)
+				} else {
+						response.CoverLetter = coverLetter
+				}
 		}
 	case "roast":
 		feedback, err := s.docProc.RoastCV(fileReader, ext)
@@ -192,7 +168,16 @@ func (s *Server) formatCVHandler(c *gin.Context) {
 	defer file.Close()
 
 	jobDesc := c.PostForm("jobDescription")
+	if jobDesc == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Job description is required"})
+		return
+	}
+
 	ext := filepath.Ext(header.Filename)
+	if ext != ".pdf" && ext != ".docx" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unsupported file type; only PDF and DOCX are allowed"})
+		return
+	}
 
 	processedFile, err := s.docProc.FormatForATS(file, ext, jobDesc)
 	if err != nil {
@@ -201,7 +186,7 @@ func (s *Server) formatCVHandler(c *gin.Context) {
 	}
 
 	// set appropriate headers for file download
-	c.Header("Content-Disposition", "attachment; filename=formatted_cv"+ext)
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=formatted_cv%s", ext))
 	c.Data(http.StatusOK, getContentType(ext), processedFile)
 }
 
@@ -258,6 +243,8 @@ func getContentType(ext string) string {
 		return "application/pdf"
 	case ".docx":
 		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	case ".txt":
+    return "text/plain"
 	default:
 		return "application/octet-stream"
 	}

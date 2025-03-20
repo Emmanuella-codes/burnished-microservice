@@ -13,6 +13,6 @@ func loggingMiddleware() gin.HandlerFunc {
 		c.Next()
 		duration := time.Since(start)
 		log.Printf("Request: %s %s | Status: %d | Duration: %v", 
-			c.Request.Method, c.Request.URL, c.Writer.Status(), duration)
+			c.Request.Method, c.Request.URL.Path, c.Writer.Status(), duration)
 	}
 }
