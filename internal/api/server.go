@@ -65,6 +65,7 @@ func (s *Server) Start() error {
 			fmt.Printf("Server forced to shutdown: %v\n", err)
 		}
 	}()
-
+	
+	fmt.Printf("Server starting on port %s\n", s.cfg.Port)
 	return s.server.ListenAndServe()
 }
