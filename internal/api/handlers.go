@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"log"
+	"os"
 
 	"fmt"
 	"io"
@@ -248,4 +249,24 @@ func getContentType(ext string) string {
 	default:
 		return "application/octet-stream"
 	}
+}
+
+func sendWebhook(url string, payload []byte) error {
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payload))
+	if err != nil {
+		return err
+	}
+
+	webhookSecret := os.Getenv("WEBHOOK_SECRET")
+	req.Header.Set("Authorization", "Bearer "+webhookSecret)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	res, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+
+	defer res.Body.Close()
+	return nil
 }
