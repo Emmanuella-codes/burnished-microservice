@@ -16,19 +16,24 @@ import (
 )
 
 type Server struct {
-	cfg 		*config.Config
-	router 	*gin.Engine
-	server 	*http.Server
-	docProc *documents.Processor
+	cfg 					*config.Config
+	router 				*gin.Engine
+	server 				*http.Server
+	docProc 			*documents.Processor
+	webhookClient *http.Client
 }
 
 func NewServer(cfg *config.Config) *Server {
 	router := gin.Default()
 	processor := documents.NewProcessor(cfg)
+	webhookClient := &http.Client{
+		Timeout: 10 * time.Second,
+	}
 	s := &Server{
 		cfg: cfg,
 		router: router,
 		docProc: processor,
+		webhookClient: webhookClient,
 		server: &http.Server{
 			Addr: 	 ":" + cfg.Port,
 			Handler: router,
@@ -45,10 +50,10 @@ func (s *Server) setupRoutes() {
 	api.Use(rateLimitMiddleware())
 	{
 		api.GET("/health", s.healthHandler)
-		api.POST("/process-cv", s.processCVHandler)
-		api.POST("/format-cv", s.formatCVHandler)
-		api.POST("/roast-cv", s.roastCVHandler)
-		api.POST("/generate-cover-letter", s.generateCoverLetterHandler)
+		api.POST("/process", s.processCVHandler)
+		// api.POST("/format-cv", s.formatCVHandler)
+		// api.POST("/roast-cv", s.roastCVHandler)
+		// api.POST("/generate-cover-letter", s.generateCoverLetterHandler)
 	}
 }
 

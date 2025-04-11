@@ -27,11 +27,15 @@ type ProcessCVRequest struct {
 }
 
 type ProcessResponse struct {
+	DocumentID  string  `json:"documentID"`
 	Success 		bool 		`json:"success"`
-	Message 		string	`json:"message,omitempty"`
-	FileURL 		string	`json:"fileUrl,omitempty"`
-	CoverLetter string	`json:"coverLetter,omitempty"`
-	Feedback 		string	`json:"feedback,omitempty"`
+	// Message 		string	`json:"message,omitempty"`
+	// FileURL 		string	`json:"fileUrl,omitempty"`
+	// CoverLetter string	`json:"coverLetter,omitempty"`
+	FormattedFile   string `json:"formattedFile,omitempty"`
+  CoverLetterFile string `json:"coverLetter,omitempty"`
+  Feedback        string `json:"feedback,omitempty"`
+  Error           string `json:"error,omitempty"`
 }
 
 func (s *Server) saveToGCS(fileData []byte, filename string) (string, error) {
@@ -71,7 +75,7 @@ func (s *Server) saveToGCS(fileData []byte, filename string) (string, error) {
 		return "", fmt.Errorf("setting GCS ACL: %w", err)
 	}
 
-	return fmt.Sprintf("https://storage.googleapis.com/%s/%s", s.cfg.StorageBucket, filename), nil
+	return fmt.Sprintf("https://storage.googleapis.com/%s/%s", bucketName, filename), nil
 }
 
 func (s *Server) healthHandler(c *gin.Context) {
@@ -158,6 +162,87 @@ func (s *Server) processCVHandler(c *gin.Context) {
 		response.Feedback = feedback
 	}
 	c.JSON(http.StatusOK, response)
+}
+
+func (s *Server) processCVHandler(c *gin.Context) {
+	//authenticate request
+	auth := c.GetHeader("Authorization")
+	expectedAuth := "Bearer " + os.Getenv("BURNISHED_WEB_API_KEY")
+	if auth != expectedAuth {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	//parse multipart form
+	if err := c.Request.ParseMultipartForm(s.cfg.MaxFileSize); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse form: " + err.Error()})
+    return
+	}
+
+	documentID := c.PostForm("documentID")
+	if documentID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "documentId is required"})
+		return
+	}
+
+	mode := c.PostForm("mode")
+	if mode != "roast" && mode != "format" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "mode must be 'roast' or 'format'"})
+			return
+	}
+
+	jobDescription := c.PostForm("jobDescription")
+	if mode == "format" && jobDescription == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "jobDescription is required for format mode"})
+			return
+	}
+
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No file provided"})
+			return
+	}
+	defer file.Close()
+
+	// validate file type
+	ext := filepath.Ext(header.Filename)
+	if ext != ".pdf" && ext != ".docx" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unsupported file type; only PDF and DOCX are allowed"})
+		return
+	}
+
+	// check file size
+	if header.Size > s.cfg.MaxFileSize {
+		c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("File size exceeds limit: %d bytes", s.cfg.MaxFileSize),
+		})
+		return
+	}
+
+	// read file
+	fileData, err := io.ReadAll(file)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file"})
+		return
+	}
+
+	// prepare webhook response
+	response := ProcessResponse{
+		DocumentID: documentID,
+		Success:    true,
+	}
+
+	// process based on mode
+	fileReader := bytes.NewReader(fileData)
+	switch mode {
+	case "format":
+		processedFile, err := s.docProc.FormatForATS(fileReader, ext, jobDescription)
+		if err != nil {
+			response.Success = false
+			response.Error = "Failed to format CV: " + err.Error()
+			s.s
+		}
+	}
 }
 
 func (s *Server) formatCVHandler(c *gin.Context) {
@@ -249,24 +334,4 @@ func getContentType(ext string) string {
 	default:
 		return "application/octet-stream"
 	}
-}
-
-func sendWebhook(url string, payload []byte) error {
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payload))
-	if err != nil {
-		return err
-	}
-
-	webhookSecret := os.Getenv("WEBHOOK_SECRET")
-	req.Header.Set("Authorization", "Bearer "+webhookSecret)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{}
-	res, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-
-	defer res.Body.Close()
-	return nil
 }
