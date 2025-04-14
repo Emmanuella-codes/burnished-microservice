@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -73,4 +75,36 @@ func (s *Server) Start() error {
 	
 	fmt.Printf("Server starting on port %s\n", s.cfg.Port)
 	return s.server.ListenAndServe()
+}
+
+func (s *Server) sendWebhook(payload ProcessResponse) error {
+	webhookURL := os.Getenv("WEBHOOK_URL")
+	if webhookURL == "" {
+		return fmt.Errorf("WEBHOOK_URL not configured")
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal webhook payload: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", webhookURL, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("failed to create webhook request: %w", err)
+	}
+
+	webhookSecret := os.Getenv("WEBHOOK_SECRET")
+	req.Header.Set("Authorization", "Bearer "+webhookSecret)
+	req.Header.Set("Content-Type", "application/json")
+
+	res, err := s.webhookClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send webhook: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("webhook returned non-200 status: %d", res.StatusCode)
+	}
+	return nil
 }
