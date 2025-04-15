@@ -2,17 +2,15 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"log"
 	"os"
+	"strings"
 
 	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
 	"time"
-
-	"cloud.google.com/go/storage"
 
 	"github.com/Emmanuella-codes/burnished-microservice/internal/ai"
 	"github.com/google/uuid"
@@ -38,44 +36,49 @@ type ProcessResponse struct {
   Error           string `json:"error,omitempty"`
 }
 
-func (s *Server) saveToGCS(fileData []byte, filename string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-  defer cancel()
-	// create a GCS client
-	client, err := storage.NewClient(ctx)
-	if err != nil {
-		return "", fmt.Errorf("failed to create storage client: %w", err)
+func (s *Server) saveToLFS(fileData []byte, filename string) (string, error) {
+	uploadDir := "./uploads"
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create upload directory: %w", err)
 	}
-	defer client.Close()
+
+	filePath := filepath.Join(uploadDir, filename)
+	if err := os.WriteFile(filePath, fileData, 0644); err != nil {
+		return "", fmt.Errorf("failed to write file: %w", err)
+	}
 	
-	// replace with bucket name
-	bucketName := s.cfg.StorageBucket
-
-	// create a bucket handle
-	bucket := client.Bucket(bucketName)
-
-	// create an object handle
-	obj := bucket.Object(filename)
-
-	// create a writer
-	w := obj.NewWriter(ctx)
-
-	w.ContentType = getContentType(filepath.Ext(filename))
-	w.CacheControl = "public, max-age=86400"
-
-	if _, err := w.Write(fileData); err != nil {
-			return "", fmt.Errorf("writing to GCS: %w", err)
-	}
-	if err := w.Close(); err != nil {
-			return "", fmt.Errorf("closing GCS writer: %w", err)
+	// generate a URL that can be used to access the file
+	baseURL := os.Getenv("BASE_URL")
+	if baseURL == "" {
+		baseURL = fmt.Sprintf("http://localhost:%s", s.cfg.Port)
 	}
 
-	// make the object publicly accessible.
-	if err := obj.ACL().Set(ctx, storage.AllUsers, storage.RoleReader); err != nil {
-		return "", fmt.Errorf("setting GCS ACL: %w", err)
+	fileURL := fmt.Sprintf("%s/files/%s", baseURL, filename)
+	return fileURL, nil
+}
+
+func (s *Server) serveFileHandler(c *gin.Context) {
+	filename := c.Param("filename")
+
+	// security check
+	if strings.Contains(filename, "..") {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
 	}
 
-	return fmt.Sprintf("https://storage.googleapis.com/%s/%s", bucketName, filename), nil
+	uploadDir := "./uploads"
+	filePath := filepath.Join(uploadDir, filename)
+
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		return
+	}
+
+	contentType := getContentType(filepath.Ext(filename))
+
+	c.Header("Content-Type", contentType)
+	c.Header("Content-Disposition", fmt.Sprintf("inline; filename=%s", filename))
+	c.File(filePath)
 }
 
 func (s *Server) healthHandler(c *gin.Context) {
@@ -171,7 +174,7 @@ func (s *Server) processCVHandler(c *gin.Context) {
 		}
 
 		filename := fmt.Sprintf("cv_%s_formatted%s", uuid.New().String(), ".pdf")
-		fileURL, err := s.saveToGCS(processedFile, filename)
+		fileURL, err := s.saveToLFS(processedFile, filename)
 		if err != nil {
 			response.Success = false
 			response.Error = "Failed to save formatted file: " + err.Error()
@@ -189,7 +192,7 @@ func (s *Server) processCVHandler(c *gin.Context) {
 			log.Printf("Failed to generate cover letter: %v", err)
 		} else {
 			coverFilename := fmt.Sprintf("cover_letter_%s.txt", uuid.New().String())
-			coverURL, err := s.saveToGCS([]byte(coverLetter), coverFilename)
+			coverURL, err := s.saveToLFS([]byte(coverLetter), coverFilename)
 			if err != nil {
 				log.Printf("Failed to save cover letter: %v", err)
 			} else {
