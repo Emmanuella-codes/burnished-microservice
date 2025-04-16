@@ -53,6 +53,7 @@ func (s *Server) setupRoutes() {
 	{
 		api.GET("/health", s.healthHandler)
 		api.POST("/process", s.processCVHandler)
+		api.GET("/files/:filename", s.serveFileHandler)
 		// api.POST("/format-cv", s.formatCVHandler)
 		// api.POST("/roast-cv", s.roastCVHandler)
 		// api.POST("/generate-cover-letter", s.generateCoverLetterHandler)

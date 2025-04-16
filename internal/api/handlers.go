@@ -37,7 +37,7 @@ type ProcessResponse struct {
 }
 
 func (s *Server) saveToLFS(fileData []byte, filename string) (string, error) {
-	uploadDir := "./uploads"
+	uploadDir := s.cfg.UploadDir
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create upload directory: %w", err)
 	}
