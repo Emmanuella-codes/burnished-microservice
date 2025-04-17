@@ -19,9 +19,9 @@ import (
 )
 
 type ProcessCVRequest struct {
-	Format				 			 string `json:"format" binding:"required,oneof=ats roast"`
-	JobDescription 			 string `json:"jobDescription,omitempty"`
-	GenerateCoverLetter  bool 	`json:"generateCoverLetter"`
+	Mode				 			  string `json:"mode" binding:"required,oneof=roast format"`
+	JobDescription 			string `json:"jobDescription"`
+	GenerateCoverLetter bool 	 `json:"generateCoverLetter"`
 }
 
 type ProcessResponse struct {
@@ -58,15 +58,15 @@ func (s *Server) saveToLFS(fileData []byte, filename string) (string, error) {
 }
 
 func (s *Server) serveFileHandler(c *gin.Context) {
-	filename := c.Param("filename")
+	filename := filepath.Clean(c.Param("filename"))
 
 	// security check
-	if strings.Contains(filename, "..") {
+	if strings.Contains(filename, "..") || filepath.IsAbs(filename) {
 		c.AbortWithStatus(http.StatusForbidden)
 		return
 	}
 
-	uploadDir := "./uploads"
+	uploadDir := s.cfg.UploadDir
 	filePath := filepath.Join(uploadDir, filename)
 
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
@@ -99,6 +99,12 @@ func (s *Server) processCVHandler(c *gin.Context) {
 		return
 	}
 
+	var req ProcessCVRequest
+	if err := c.ShouldBind(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: " + err.Error()})
+		return
+	}
+
 	//parse multipart form
 	if err := c.Request.ParseMultipartForm(s.cfg.MaxFileSize); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse form: " + err.Error()})
@@ -111,13 +117,13 @@ func (s *Server) processCVHandler(c *gin.Context) {
 		return
 	}
 
-	mode := c.PostForm("mode")
+	mode := req.Mode
 	if mode != "roast" && mode != "format" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "mode must be 'roast' or 'format'"})
 			return
 	}
 
-	jobDescription := c.PostForm("jobDescription")
+	jobDescription := req.JobDescription
 	if mode == "format" && jobDescription == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "jobDescription is required for format mode"})
 			return

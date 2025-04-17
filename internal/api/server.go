@@ -47,16 +47,17 @@ func NewServer(cfg *config.Config) *Server {
 
 func (s *Server) setupRoutes() {
 	api := s.router.Group("/api/v1")
-	api.Use(loggingMiddleware())
-	api.Use(validateRequestMiddleware())
-	api.Use(rateLimitMiddleware())
+	api.Use(loggingMiddleware(), validateRequestMiddleware(), rateLimitMiddleware())
 	{
 		api.GET("/health", s.healthHandler)
 		api.POST("/process", s.processCVHandler)
-		api.GET("/files/:filename", s.serveFileHandler)
 		// api.POST("/format-cv", s.formatCVHandler)
 		// api.POST("/roast-cv", s.roastCVHandler)
 		// api.POST("/generate-cover-letter", s.generateCoverLetterHandler)
+	}
+	api.Use(authMiddleware())
+	{
+		api.GET("/files/:filename", s.serveFileHandler)
 	}
 }
 
