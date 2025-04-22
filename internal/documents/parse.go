@@ -5,10 +5,21 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Emmanuella-codes/burnished-microservice/internal/config"
 	"github.com/unidoc/unipdf/v3/creator"
 	"github.com/unidoc/unipdf/v3/extractor"
 	"github.com/unidoc/unipdf/v3/model"
 )
+
+type Formatter struct {
+	config *config.Config
+}
+
+func NewFormatter(cfg *config.Config) *Formatter {
+	return &Formatter{
+		config: cfg,
+	}
+}
 
 type CVSections struct {
 	Education   []string
@@ -17,7 +28,7 @@ type CVSections struct {
 	Skills      []string
 }
 
-func ParseCV(fileData []byte) (*CVSections, error) {
+func (f *Formatter) ParseCV(fileData []byte) (*CVSections, error) {
 	pdfReader, err := model.NewPdfReader(bytes.NewReader(fileData))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read PDF: %w", err)
@@ -85,7 +96,7 @@ func ParseCV(fileData []byte) (*CVSections, error) {
 	return sections, nil
 }
 
-func Format(sections *CVSections, jobDescription string) ([]byte, error) {
+func (f *Formatter) Format(sections *CVSections, jobDescription string) ([]byte, error) {
 	c := creator.New()
 
 	font, err := model.NewStandard14Font("Helvetica")
