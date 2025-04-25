@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -16,19 +18,24 @@ import (
 )
 
 type Server struct {
-	cfg 		*config.Config
-	router 	*gin.Engine
-	server 	*http.Server
-	docProc *documents.Processor
+	cfg 					*config.Config
+	router 				*gin.Engine
+	server 				*http.Server
+	docProc 			*documents.Processor
+	webhookClient *http.Client
 }
 
 func NewServer(cfg *config.Config) *Server {
 	router := gin.Default()
 	processor := documents.NewProcessor(cfg)
+	webhookClient := &http.Client{
+		Timeout: 10 * time.Second,
+	}
 	s := &Server{
 		cfg: cfg,
 		router: router,
 		docProc: processor,
+		webhookClient: webhookClient,
 		server: &http.Server{
 			Addr: 	 ":" + cfg.Port,
 			Handler: router,
@@ -45,10 +52,10 @@ func (s *Server) setupRoutes() {
 	api.Use(rateLimitMiddleware())
 	{
 		api.GET("/health", s.healthHandler)
-		api.POST("/process-cv", s.processCVHandler)
-		api.POST("/format-cv", s.formatCVHandler)
-		api.POST("/roast-cv", s.roastCVHandler)
-		api.POST("/generate-cover-letter", s.generateCoverLetterHandler)
+		api.POST("/process", s.processCVHandler)
+		// api.POST("/format-cv", s.formatCVHandler)
+		// api.POST("/roast-cv", s.roastCVHandler)
+		// api.POST("/generate-cover-letter", s.generateCoverLetterHandler)
 	}
 }
 
@@ -68,4 +75,36 @@ func (s *Server) Start() error {
 	
 	fmt.Printf("Server starting on port %s\n", s.cfg.Port)
 	return s.server.ListenAndServe()
+}
+
+func (s *Server) sendWebhook(payload ProcessResponse) error {
+	webhookURL := os.Getenv("WEBHOOK_URL")
+	if webhookURL == "" {
+		return fmt.Errorf("WEBHOOK_URL not configured")
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal webhook payload: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", webhookURL, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("failed to create webhook request: %w", err)
+	}
+
+	webhookSecret := os.Getenv("WEBHOOK_SECRET")
+	req.Header.Set("Authorization", "Bearer "+webhookSecret)
+	req.Header.Set("Content-Type", "application/json")
+
+	res, err := s.webhookClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send webhook: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("webhook returned non-200 status: %d", res.StatusCode)
+	}
+	return nil
 }
