@@ -2,17 +2,15 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"log"
 	"os"
+	"strings"
 
 	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
 	"time"
-
-	"cloud.google.com/go/storage"
 
 	"github.com/Emmanuella-codes/burnished-microservice/internal/ai"
 	"github.com/google/uuid"
@@ -21,9 +19,11 @@ import (
 )
 
 type ProcessCVRequest struct {
-	Format				 			 string `json:"format" binding:"required,oneof=ats roast"`
-	JobDescription 			 string `json:"jobDescription,omitempty"`
-	GenerateCoverLetter  bool 	`json:"generateCoverLetter"`
+	File          	[]byte  `form:"file"`
+  Filename      	string  `form:"filename"`
+	Mode				 		string  `json:"mode" binding:"required,oneof=roast format"`
+	JobDescription 	string  `json:"jobDescription"`
+	// GenerateCoverLetter bool 	 `json:"generateCoverLetter"`
 }
 
 type ProcessResponse struct {
@@ -38,44 +38,49 @@ type ProcessResponse struct {
   Error           string `json:"error,omitempty"`
 }
 
-func (s *Server) saveToGCS(fileData []byte, filename string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-  defer cancel()
-	// create a GCS client
-	client, err := storage.NewClient(ctx)
-	if err != nil {
-		return "", fmt.Errorf("failed to create storage client: %w", err)
+func (s *Server) saveToLFS(fileData []byte, filename string) (string, error) {
+	uploadDir := s.cfg.UploadDir
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create upload directory: %w", err)
 	}
-	defer client.Close()
+
+	filePath := filepath.Join(uploadDir, filename)
+	if err := os.WriteFile(filePath, fileData, 0644); err != nil {
+		return "", fmt.Errorf("failed to write file: %w", err)
+	}
 	
-	// replace with bucket name
-	bucketName := s.cfg.StorageBucket
-
-	// create a bucket handle
-	bucket := client.Bucket(bucketName)
-
-	// create an object handle
-	obj := bucket.Object(filename)
-
-	// create a writer
-	w := obj.NewWriter(ctx)
-
-	w.ContentType = getContentType(filepath.Ext(filename))
-	w.CacheControl = "public, max-age=86400"
-
-	if _, err := w.Write(fileData); err != nil {
-			return "", fmt.Errorf("writing to GCS: %w", err)
-	}
-	if err := w.Close(); err != nil {
-			return "", fmt.Errorf("closing GCS writer: %w", err)
+	// generate a URL that can be used to access the file
+	baseURL := os.Getenv("BASE_URL")
+	if baseURL == "" {
+		baseURL = fmt.Sprintf("http://localhost:%s", s.cfg.Port)
 	}
 
-	// make the object publicly accessible.
-	if err := obj.ACL().Set(ctx, storage.AllUsers, storage.RoleReader); err != nil {
-		return "", fmt.Errorf("setting GCS ACL: %w", err)
+	fileURL := fmt.Sprintf("%s/files/%s", baseURL, filename)
+	return fileURL, nil
+}
+
+func (s *Server) serveFileHandler(c *gin.Context) {
+	filename := filepath.Clean(c.Param("filename"))
+
+	// security check
+	if strings.Contains(filename, "..") || filepath.IsAbs(filename) {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
 	}
 
-	return fmt.Sprintf("https://storage.googleapis.com/%s/%s", bucketName, filename), nil
+	uploadDir := s.cfg.UploadDir
+	filePath := filepath.Join(uploadDir, filename)
+
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		return
+	}
+
+	contentType := getContentType(filepath.Ext(filename))
+
+	c.Header("Content-Type", contentType)
+	c.Header("Content-Disposition", fmt.Sprintf("inline; filename=%s", filename))
+	c.File(filePath)
 }
 
 func (s *Server) healthHandler(c *gin.Context) {
@@ -88,7 +93,7 @@ func (s *Server) healthHandler(c *gin.Context) {
 }
 
 func (s *Server) processCVHandler(c *gin.Context) {
-	//authenticate request
+	// authenticate request
 	auth := c.GetHeader("Authorization")
 	expectedAuth := "Bearer " + os.Getenv("BURNISHED_WEB_API_KEY")
 	if auth != expectedAuth {
@@ -96,7 +101,7 @@ func (s *Server) processCVHandler(c *gin.Context) {
 		return
 	}
 
-	//parse multipart form
+	// parse multipart form
 	if err := c.Request.ParseMultipartForm(s.cfg.MaxFileSize); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse form: " + err.Error()})
     return
@@ -110,20 +115,20 @@ func (s *Server) processCVHandler(c *gin.Context) {
 
 	mode := c.PostForm("mode")
 	if mode != "roast" && mode != "format" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "mode must be 'roast' or 'format'"})
-			return
+		c.JSON(http.StatusBadRequest, gin.H{"error": "mode must be 'roast' or 'format'"})
+		return
 	}
 
 	jobDescription := c.PostForm("jobDescription")
 	if mode == "format" && jobDescription == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "jobDescription is required for format mode"})
-			return
+		c.JSON(http.StatusBadRequest, gin.H{"error": "jobDescription is required for format mode"})
+		return
 	}
 
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "No file provided"})
-			return
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No file provided"})
+		return
 	}
 	defer file.Close()
 
@@ -155,11 +160,19 @@ func (s *Server) processCVHandler(c *gin.Context) {
 		Success:    true,
 	}
 
+	sections, err := s.docFormatter.ParseCV(fileData)
+	if err != nil {
+		response.Error = fmt.Sprintf("Failed to parse CV: %v", err)
+		s.sendWebhook(response)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": response.Error})
+    return
+	}
+
+
 	// process based on mode
-	fileReader := bytes.NewReader(fileData)
 	switch mode {
 	case "format":
-		processedFile, err := s.docProc.FormatForATS(fileReader, ext, jobDescription)
+		processedFile, err := s.docFormatter.Format(sections, jobDescription)
 		if err != nil {
 			response.Success = false
 			response.Error = "Failed to format CV: " + err.Error()
@@ -171,7 +184,7 @@ func (s *Server) processCVHandler(c *gin.Context) {
 		}
 
 		filename := fmt.Sprintf("cv_%s_formatted%s", uuid.New().String(), ".pdf")
-		fileURL, err := s.saveToGCS(processedFile, filename)
+		fileURL, err := s.saveToLFS(processedFile, filename)
 		if err != nil {
 			response.Success = false
 			response.Error = "Failed to save formatted file: " + err.Error()
@@ -189,7 +202,7 @@ func (s *Server) processCVHandler(c *gin.Context) {
 			log.Printf("Failed to generate cover letter: %v", err)
 		} else {
 			coverFilename := fmt.Sprintf("cover_letter_%s.txt", uuid.New().String())
-			coverURL, err := s.saveToGCS([]byte(coverLetter), coverFilename)
+			coverURL, err := s.saveToLFS([]byte(coverLetter), coverFilename)
 			if err != nil {
 				log.Printf("Failed to save cover letter: %v", err)
 			} else {
@@ -198,6 +211,7 @@ func (s *Server) processCVHandler(c *gin.Context) {
 		}
 
 	case "roast":
+		fileReader := bytes.NewReader(fileData)
 		feedback, err := s.docProc.RoastCV(fileReader, ext)
 		if err != nil {
 			response.Success = false

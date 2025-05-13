@@ -12,7 +12,8 @@ type Config struct {
 	DocxTemplate  string
 	PdfTemplate   string
 	MaxFileSize   int64
-	StorageBucket string
+	// StorageBucket string
+	UploadDir     string
 }
 
 func Load() (*Config, error) {
@@ -51,10 +52,14 @@ func Load() (*Config, error) {
 		cfg.MaxFileSize = size
 	}
 
-	cfg.StorageBucket = os.Getenv("STORAGE_BUCKET")
-    if cfg.StorageBucket == "" {
-        return nil, fmt.Errorf("environment variable STORAGE_BUCKET is required")
-    }
+	cfg.UploadDir = "./uploads"
+	if uploadDir := os.Getenv("UPLOAD_DIR"); uploadDir != "" {
+		cfg.UploadDir = uploadDir
+	}
 
+	if err := os.MkdirAll(cfg.UploadDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create upload directory: %w", err)
+	}
+	
 	return cfg, nil
 }
