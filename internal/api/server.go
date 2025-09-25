@@ -54,9 +54,8 @@ func (s *Server) setupRoutes() {
 	{
 		api.GET("/health", s.healthHandler)
 		api.POST("/process", s.processCVHandler)
-		// api.POST("/format-cv", s.formatCVHandler)
-		// api.POST("/roast-cv", s.roastCVHandler)
-		// api.POST("/generate-cover-letter", s.generateCoverLetterHandler)
+		api.POST("/generate/cover-letter", s.coverLetterHandler)
+
 	}
 	api.Use(authMiddleware())
 	{
@@ -83,7 +82,7 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) sendWebhook(payload ProcessResponse) error {
-	webhookURL := os.Getenv("WEBHOOK_URL")
+	webhookURL := os.Getenv("BURNISHED_WEB_WEBHOOK_URL")
 	if webhookURL == "" {
 		return fmt.Errorf("WEBHOOK_URL not configured")
 	}
