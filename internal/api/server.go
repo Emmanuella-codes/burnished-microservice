@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -28,8 +29,9 @@ type Server struct {
 
 func NewServer(cfg *config.Config) *Server {
 	router := gin.Default()
+	pdfProcessor := documents.NewPDFProcessor()
 	processor := documents.NewProcessor(cfg)
-	formatter := documents.NewFormatter(cfg)
+	formatter := documents.NewFormatter(cfg, pdfProcessor)
 	webhookClient := &http.Client{
 		Timeout: 10 * time.Second,
 	}
@@ -50,7 +52,7 @@ func NewServer(cfg *config.Config) *Server {
 
 func (s *Server) setupRoutes() {
 	api := s.router.Group("/api/v1")
-	api.Use(loggingMiddleware(), validateRequestMiddleware(), rateLimitMiddleware())
+	api.Use(loggingMiddleware(), rateLimitMiddleware())
 	{
 		api.GET("/health", s.healthHandler)
 		api.POST("/process", s.processCVHandler)
@@ -101,10 +103,12 @@ func (s *Server) sendWebhook(payload ProcessResponse) error {
 	req.Header.Set("Authorization", "Bearer "+webhookSecret)
 	req.Header.Set("Content-Type", "application/json")
 
+	log.Printf("Sending webhook to: %s", webhookURL)
 	res, err := s.webhookClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send webhook: %w", err)
 	}
+	log.Printf("Webhook response status: %d", res.StatusCode)
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {

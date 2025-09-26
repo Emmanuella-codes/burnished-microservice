@@ -6,18 +6,18 @@ import (
 	"strings"
 
 	"github.com/Emmanuella-codes/burnished-microservice/internal/config"
-	"github.com/unidoc/unipdf/v3/creator"
-	"github.com/unidoc/unipdf/v3/extractor"
-	"github.com/unidoc/unipdf/v3/model"
+	"github.com/jung-kurt/gofpdf"
 )
 
 type Formatter struct {
-	config *config.Config
+	config 			 *config.Config
+	pdfProcessor *PDFProcessor
 }
 
-func NewFormatter(cfg *config.Config) *Formatter {
+func NewFormatter(cfg *config.Config, pdfProcessor *PDFProcessor) *Formatter {
 	return &Formatter{
-		config: cfg,
+		config: 			cfg,
+		pdfProcessor: pdfProcessor,
 	}
 }
 
@@ -29,155 +29,124 @@ type CVSections struct {
 }
 
 func (f *Formatter) ParseCV(fileData []byte) (*CVSections, error) {
-	pdfReader, err := model.NewPdfReader(bytes.NewReader(fileData))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read PDF: %w", err)
-	}
+	reader := bytes.NewReader(fileData)
+
+	text, err := f.pdfProcessor.ExtractText(reader)
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract text from PDF: %w", err)
+		}
 
 	sections := &CVSections{}
 	var currSection string
 
-	numPages, err := pdfReader.GetNumPages()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get page count: %w", err)
-	}
-
-	for i := 0; i < numPages; i++ {
-		page, err := pdfReader.GetPage(i + 1)
-		if err != nil {
+	// split text into lines
+	lines := strings.Split(text, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
 		}
 
-		ex, err := extractor.New(page)
-		if err != nil {
+		lowerLine := strings.ToLower(line)
+		if strings.Contains(lowerLine, "education") {
+			currSection = "education"
+			continue
+		} else if strings.Contains(lowerLine, "experience") || strings.Contains(lowerLine, "work history") {
+			currSection = "experience"
+			continue
+		} else if strings.Contains(lowerLine, "projects") {
+			currSection = "projects"
+			continue
+		} else if strings.Contains(lowerLine, "skills") {
+			currSection = "skills"
 			continue
 		}
 
-		text, err := ex.ExtractText()
-		if err != nil {
-			continue
-		}
-
-		// split text into lines
-		lines := strings.Split(text, "\n")
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-
-			lowerLine := strings.ToLower(line)
-			if strings.Contains(lowerLine, "education") {
-				currSection = "education"
-				continue
-			} else if strings.Contains(lowerLine, "experience") || strings.Contains(lowerLine, "work history") {
-				currSection = "experience"
-				continue
-			} else if strings.Contains(lowerLine, "projects") {
-				currSection = "projects"
-				continue
-			} else if strings.Contains(lowerLine, "skills") {
-				currSection = "skills"
-				continue
-			}
-
-			switch currSection {
-			case "education":
-				sections.Education = append(sections.Education, line)
-			case "experience":
-				sections.Experiences = append(sections.Experiences, line)
-			case "projects":
-				sections.Projects = append(sections.Projects, line)
-			case "skills":
-				sections.Skills = append(sections.Skills, line)
-			}
+		switch currSection {
+		case "education":
+			sections.Education = append(sections.Education, line)
+		case "experience":
+			sections.Experiences = append(sections.Experiences, line)
+		case "projects":
+			sections.Projects = append(sections.Projects, line)
+		case "skills":
+			sections.Skills = append(sections.Skills, line)
 		}
 	}
 	return sections, nil
 }
 
 func (f *Formatter) Format(sections *CVSections, jobDescription string) ([]byte, error) {
-	c := creator.New()
-
-	font, err := model.NewStandard14Font("Helvetica")
-	if err != nil {
-		return nil, fmt.Errorf("failed to load standard font: %w", err)
-	}
-	c.NewPage()
-	p := c.NewParagraph("")
-	p.SetFont(font)
-	p.SetFontSize(16)
-	p.SetPos(50, 50)
-	c.Draw(p)
-	y := 100.0
-
-	// skills
-	y += 10
-	p = c.NewParagraph("Skills")
-	p.SetFont(font)
-	p.SetFontSize(14)
-	p.SetPos(50, y)
-	c.Draw(p)
-	y += 20
-	for _, skill := range sections.Skills {
-		p = c.NewParagraph(skill)
-		p.SetFont(font)
-		p.SetFontSize(12)
-		p.SetPos(50, y)
-		c.Draw(p)
-		y += 15
+	if sections == nil {
+		return nil, fmt.Errorf("sections cannot be nil")
 	}
 
-	// experience
-	p.SetFont(font)
-	p.SetFontSize(14)
-	p.SetPos(50, y)
-	c.Draw(p)
-	y += 20
-	for _, exp := range sections.Experiences {
-		p = c.NewParagraph(exp)
-		p.SetFont(font)
-		p.SetFontSize(12)
-		p.SetPos(50, y)
-		c.Draw(p)
-		y += 15
+	pdf := gofpdf.New("P", "mm", "A4", "")
+	pdf.AddPage()
+	pdf.SetFont("Arial", "B", 16)
+
+	// set margins
+	pdf.SetMargins(20, 20, 20)
+	pdf.SetAutoPageBreak(true, 20)
+
+	// skills section
+	if len(sections.Skills) > 0 {
+		pdf.SetFont("Arial", "B", 14)
+		pdf.Cell(0, 10, "Skills")
+		pdf.Ln(10)
+
+		pdf.SetFont("Arial", "", 12)
+		for _, skill := range sections.Skills {
+			pdf.Cell(0, 6, skill)
+			pdf.Ln(6)
+		}
+		pdf.Ln(5)
 	}
 
-	// education
-	p = c.NewParagraph("Education")
-	p.SetFont(font)
-	p.SetFontSize(14)
-	p.SetPos(50, y)
-	c.Draw(p)
-	y += 20
-	for _, edu := range sections.Education {
-		p = c.NewParagraph(edu)
-		p.SetFont(font)
-		p.SetFontSize(12)
-		p.SetPos(50, y)
-		c.Draw(p)
-		y += 15
+	// experience section
+	if len(sections.Experiences) > 0 {
+		pdf.SetFont("Arial", "B", 14)
+		pdf.Cell(0, 10, "Experience")
+		pdf.Ln(15)
+
+		pdf.SetFont("Arial", "", 12)
+		for _, exp := range sections.Experiences {
+			pdf.Cell(0, 6, exp)
+			pdf.Ln(8)
+		}
+		pdf.Ln(5)
 	}
 
-	// projects
-	y += 10
-	p = c.NewParagraph("Projects")
-	p.SetFont(font)
-	p.SetFontSize(14)
-	p.SetPos(50, y)
-	c.Draw(p)
-	y += 20
-	for _, proj := range sections.Projects {
-		p = c.NewParagraph(proj)
-		p.SetFont(font)
-		p.SetFontSize(12)
-		p.SetPos(50, y)
-		c.Draw(p)
-		y += 15
+	// education section
+	if len(sections.Education) > 0 {
+		pdf.SetFont("Arial", "B", 14)
+		pdf.Cell(0, 10, "Education")
+		pdf.Ln(15)
+		
+		pdf.SetFont("Arial", "", 12)
+		for _, edu := range sections.Education {
+			pdf.Cell(0, 6, edu)
+			pdf.Ln(8)
+		}
+		pdf.Ln(5)
+	}
+
+	// projects section
+	if len(sections.Projects) > 0 {
+		pdf.SetFont("Arial", "B", 14)
+		pdf.Cell(0, 10, "Projects")
+		pdf.Ln(15)
+		
+		pdf.SetFont("Arial", "", 12)
+		for _, proj := range sections.Projects {
+			pdf.Cell(0, 6, proj)
+			pdf.Ln(8)
+		}
 	}
 
 	var buf bytes.Buffer
-	if err := c.Write(&buf); err != nil {
+	 err := pdf.Output(&buf)
+	if err != nil {
 		return nil, fmt.Errorf("failed to write PDF: %w", err)
 	}
 	return buf.Bytes(), nil

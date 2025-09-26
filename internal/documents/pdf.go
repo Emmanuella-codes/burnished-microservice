@@ -4,31 +4,20 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+
 	// "os/exec"
 	"strings"
 
-	"github.com/unidoc/unioffice/document"
-	"github.com/unidoc/unipdf/v3/creator"
-	"github.com/unidoc/unipdf/v3/extractor"
-	"github.com/unidoc/unipdf/v3/model"
+	"github.com/jung-kurt/gofpdf"
+	"github.com/ledongthuc/pdf"
 )
 
 type PDFProcessor struct {
-	templatePath string
+
 }
 
-func NewPDFProcessor(templatePath string) (*PDFProcessor, error) {
-	if templatePath != "" {
-		// Validate template existence (optional, could log instead).
-		doc, err := document.Open(templatePath)
-		if err != nil {
-				return nil, fmt.Errorf("invalid template path %s: %w", templatePath, err)
-		}
-		doc.Close() // Close since we’re just validating.
-}
-	return &PDFProcessor{
-		templatePath: templatePath,
-	}, nil
+func NewPDFProcessor() *PDFProcessor {
+	return &PDFProcessor{}
 }
 
 func (p *PDFProcessor) ExtractText(file io.Reader) (string, error) {
@@ -38,31 +27,24 @@ func (p *PDFProcessor) ExtractText(file io.Reader) (string, error) {
 	}
 
 	// create a reader for the PDF
-	pdfReader, err := model.NewPdfReader(bytes.NewReader(fileBytes))
+	reader := bytes.NewReader(fileBytes)
+	pdfReader, err := pdf.NewReader(reader, int64(len(fileBytes)))
 	if err != nil {
 		return "", fmt.Errorf("parsing PDF: %w", err)
 	}
 
-	numPages, err := pdfReader.GetNumPages()
-	if err != nil {
-		return "", fmt.Errorf("getting page count: %w", err)
-	}
-
 	var allText string
+	numPages := pdfReader.NumPage()
+
 	for i := 1; i <= numPages; i++ {
-		page, err := pdfReader.GetPage(i)
-		if err != nil {
-			return "", fmt.Errorf("getting page %d: %w", i, err)
+		page := pdfReader.Page(i)
+		if page.V.IsNull() {
+			continue
 		}
 
-		ex, err := extractor.New(page)
+		text, err := page.GetPlainText(nil)
 		if err != nil {
-			return "", fmt.Errorf("creating extractor for page %d: %w", i, err)
-		}
-
-		text, err := ex.ExtractText()
-		if err != nil {
-			return "", fmt.Errorf("extracting text from page %d: %w", i, err)
+			return "", fmt.Errorf("error extracting text from page %d: %w", i, err)
 		}
 
 		allText += text + "\n"
@@ -72,39 +54,47 @@ func (p *PDFProcessor) ExtractText(file io.Reader) (string, error) {
 }
 
 func (p *PDFProcessor) CreateFormattedDocument(content string) ([]byte, error) {
-	creator := creator.New()
+	pdf := gofpdf.New("P", "mm", "A4", "")
+	pdf.AddPage()
 
-	// set document properties
-	creator.SetPageMargins(50, 50, 50, 50)
-	creator.NewPage()
+	// set margins
+	pdf.SetMargins(20, 20, 20)
+	pdf.SetAutoPageBreak(true, 20)
 
-	// add content to the document
-	// textStyle := creator.NewTextStyle()
-	// textStyle.FontSize = 11
+	// set default font
+	pdf.SetFont("Arial", "", 11)
 
 	// split content into paragraphs
 	paragraphs := strings.Split(content, "\n\n")
+
 	for _, paragraph := range paragraphs {
+		paragraph = strings.TrimSpace(paragraph)
 		if paragraph == "" {
 			continue
 		}
 
-		// create a paragraph
-		p := creator.NewParagraph(paragraph)
-		p.SetMargins(0, 0, 10, 10)
+		// handle long paragraphs that might need wrapping
+		lines := strings.Split(paragraph, "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				pdf.Ln(5) // add space for empty lines
+				continue
+			}
 
-		// add the paragraph to the creator
-		err := creator.Draw(p)
-		if err != nil {
-			return nil, fmt.Errorf("drawing paragraph: %w", err)
+			// multicell for automatic text wrapping
+			pdf.MultiCell(0, 6, line, "", "", false)
+			pdf.Ln(2) // small space between lines
 		}
+
+		pdf.Ln(5) // space between paragraphs
 	}
 
-	// output bytes
+	// output to bytes buffer
 	var buf bytes.Buffer
-	err := creator.Write(&buf)
+	err := pdf.Output(&buf)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("generating PDF: %w", err)
 	}
 
 	return buf.Bytes(), nil

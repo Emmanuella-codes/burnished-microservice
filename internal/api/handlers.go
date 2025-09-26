@@ -100,25 +100,33 @@ func (s *Server) processCVHandler(c *gin.Context) {
 	// authenticate request
 	auth := c.GetHeader("Authorization")
 	expectedAuth := "Bearer " + os.Getenv("BURNISHED_WEB_API_KEY")
+	log.Printf("Received auth: %s", auth)
+	log.Printf("Expected auth: %s", expectedAuth)
 	if auth != expectedAuth {
+		log.Printf("Auth failed")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
 	// parse multipart form
 	if err := c.Request.ParseMultipartForm(s.cfg.MaxFileSize); err != nil {
+		log.Printf("Failed to parse multipart form: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse form: " + err.Error()})
     return
 	}
 
 	documentID := c.PostForm("documentID")
+	log.Printf("Received documentID: %s", documentID)
 	if documentID == "" {
+		log.Printf("documentID is empty")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "documentId is required"})
 		return
 	}
 
 	mode := c.PostForm("mode")
+	log.Printf("Received mode: %s", mode)
 	if mode != "roast" && mode != "format" {
+		log.Printf("Invalid mode: %s", mode)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "mode must be 'roast' or 'format'"})
 		return
 	}
@@ -164,8 +172,10 @@ func (s *Server) processCVHandler(c *gin.Context) {
 		Status:     StatusCompleted,
 	}
 
+	log.Println("starting ParseCV...")
 	sections, err := s.docFormatter.ParseCV(fileData)
 	if err != nil {
+		log.Printf("ParseCV failed: %v", err)
 		response.Error = fmt.Sprintf("Failed to parse CV: %v", err)
 		s.sendWebhook(response)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": response.Error})
@@ -228,16 +238,7 @@ func (s *Server) processCVHandler(c *gin.Context) {
 		response.Feedback = feedback
 	}
 
-	// send webhook for successful processing
-	if err := s.sendWebhook(response); err != nil {
-		log.Printf("Failed to send webhook: %v", err)
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"success":    true,
-		"message":    "Processing started",
-		"documentID": documentID,
-	})
+	c.JSON(http.StatusOK, response)
 }
 
 func (s *Server) coverLetterHandler(c *gin.Context) {
