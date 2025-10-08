@@ -7,6 +7,7 @@ import (
 
 	"github.com/Emmanuella-codes/burnished-microservice/internal/api"
 	"github.com/Emmanuella-codes/burnished-microservice/internal/config"
+	"github.com/Emmanuella-codes/burnished-microservice/internal/supabase"
 )
 
 func main() {
@@ -18,6 +19,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
+
+	// initialize supabase
+	supabase.InitSupabase()
 
 	server := api.NewServer(cfg)
 	log.Printf("Starting server on port %s...", cfg.Port)
