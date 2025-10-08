@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/Emmanuella-codes/burnished-microservice/internal/config"
 	"github.com/Emmanuella-codes/burnished-microservice/internal/documents"
+	"github.com/Emmanuella-codes/burnished-microservice/internal/supabase"
 
 	"github.com/gin-gonic/gin"
 )
@@ -28,8 +30,9 @@ type Server struct {
 
 func NewServer(cfg *config.Config) *Server {
 	router := gin.Default()
+	pdfProcessor := documents.NewPDFProcessor()
 	processor := documents.NewProcessor(cfg)
-	formatter := documents.NewFormatter(cfg)
+	formatter := documents.NewFormatter(cfg, pdfProcessor)
 	webhookClient := &http.Client{
 		Timeout: 10 * time.Second,
 	}
@@ -50,13 +53,13 @@ func NewServer(cfg *config.Config) *Server {
 
 func (s *Server) setupRoutes() {
 	api := s.router.Group("/api/v1")
-	api.Use(loggingMiddleware(), validateRequestMiddleware(), rateLimitMiddleware())
+	api.Use(loggingMiddleware(), rateLimitMiddleware())
 	{
 		api.GET("/health", s.healthHandler)
 		api.POST("/process", s.processCVHandler)
-		// api.POST("/format-cv", s.formatCVHandler)
-		// api.POST("/roast-cv", s.roastCVHandler)
-		// api.POST("/generate-cover-letter", s.generateCoverLetterHandler)
+		api.POST("/generate/cover-letter", s.coverLetterHandler)
+
+		api.POST("/upload", supabase.UploadToSupabase)
 	}
 	api.Use(authMiddleware())
 	{
@@ -83,7 +86,7 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) sendWebhook(payload ProcessResponse) error {
-	webhookURL := os.Getenv("WEBHOOK_URL")
+	webhookURL := os.Getenv("BURNISHED_WEB_WEBHOOK_URL")
 	if webhookURL == "" {
 		return fmt.Errorf("WEBHOOK_URL not configured")
 	}
@@ -102,10 +105,12 @@ func (s *Server) sendWebhook(payload ProcessResponse) error {
 	req.Header.Set("Authorization", "Bearer "+webhookSecret)
 	req.Header.Set("Content-Type", "application/json")
 
+	log.Printf("Sending webhook to: %s", webhookURL)
 	res, err := s.webhookClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send webhook: %w", err)
 	}
+	log.Printf("Webhook response status: %d", res.StatusCode)
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {

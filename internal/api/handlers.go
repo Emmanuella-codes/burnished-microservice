@@ -18,6 +18,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type ProcessingStatus string
+
+const (
+	StatusCompleted ProcessingStatus = "completed"
+	StatusFailed    ProcessingStatus = "failed"
+)
+
 type ProcessCVRequest struct {
 	File          	[]byte  `form:"file"`
   Filename      	string  `form:"filename"`
@@ -27,15 +34,12 @@ type ProcessCVRequest struct {
 }
 
 type ProcessResponse struct {
-	DocumentID  string  `json:"documentID"`
-	Success 		bool 		`json:"success"`
-	// Message 		string	`json:"message,omitempty"`
-	// FileURL 		string	`json:"fileUrl,omitempty"`
-	// CoverLetter string	`json:"coverLetter,omitempty"`
-	FormattedFile   string `json:"formattedFile,omitempty"`
-  CoverLetterFile string `json:"coverLetter,omitempty"`
-  Feedback        string `json:"feedback,omitempty"`
-  Error           string `json:"error,omitempty"`
+	DocumentID  		string  					`json:"documentID"`
+	Status 					ProcessingStatus 	`json:"status"`
+	FormattedFile   string 						`json:"formattedFile,omitempty"`
+  CoverLetterFile string 						`json:"coverLetter,omitempty"`
+  Feedback        string 						`json:"feedback,omitempty"`
+  Error           string 						`json:"error,omitempty"`
 }
 
 func (s *Server) saveToLFS(fileData []byte, filename string) (string, error) {
@@ -96,25 +100,33 @@ func (s *Server) processCVHandler(c *gin.Context) {
 	// authenticate request
 	auth := c.GetHeader("Authorization")
 	expectedAuth := "Bearer " + os.Getenv("BURNISHED_WEB_API_KEY")
+	log.Printf("Received auth: %s", auth)
+	log.Printf("Expected auth: %s", expectedAuth)
 	if auth != expectedAuth {
+		log.Printf("Auth failed")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
 	// parse multipart form
 	if err := c.Request.ParseMultipartForm(s.cfg.MaxFileSize); err != nil {
+		log.Printf("Failed to parse multipart form: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse form: " + err.Error()})
     return
 	}
 
 	documentID := c.PostForm("documentID")
+	log.Printf("Received documentID: %s", documentID)
 	if documentID == "" {
+		log.Printf("documentID is empty")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "documentId is required"})
 		return
 	}
 
 	mode := c.PostForm("mode")
+	log.Printf("Received mode: %s", mode)
 	if mode != "roast" && mode != "format" {
+		log.Printf("Invalid mode: %s", mode)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "mode must be 'roast' or 'format'"})
 		return
 	}
@@ -157,24 +169,25 @@ func (s *Server) processCVHandler(c *gin.Context) {
 	// prepare webhook response
 	response := ProcessResponse{
 		DocumentID: documentID,
-		Success:    true,
+		Status:     StatusCompleted,
 	}
 
+	log.Println("starting ParseCV...")
 	sections, err := s.docFormatter.ParseCV(fileData)
 	if err != nil {
+		log.Printf("ParseCV failed: %v", err)
 		response.Error = fmt.Sprintf("Failed to parse CV: %v", err)
 		s.sendWebhook(response)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": response.Error})
     return
 	}
 
-
 	// process based on mode
 	switch mode {
 	case "format":
 		processedFile, err := s.docFormatter.Format(sections, jobDescription)
 		if err != nil {
-			response.Success = false
+			response.Status = StatusFailed
 			response.Error = "Failed to format CV: " + err.Error()
 			if err := s.sendWebhook(response); err != nil {
 				log.Printf("Failed to send webhook: %v", err)
@@ -186,7 +199,7 @@ func (s *Server) processCVHandler(c *gin.Context) {
 		filename := fmt.Sprintf("cv_%s_formatted%s", uuid.New().String(), ".pdf")
 		fileURL, err := s.saveToLFS(processedFile, filename)
 		if err != nil {
-			response.Success = false
+			response.Status = StatusFailed
 			response.Error = "Failed to save formatted file: " + err.Error()
 			if err := s.sendWebhook(response); err != nil {
 				log.Printf("Failed to send webhook: %v", err)
@@ -214,7 +227,7 @@ func (s *Server) processCVHandler(c *gin.Context) {
 		fileReader := bytes.NewReader(fileData)
 		feedback, err := s.docProc.RoastCV(fileReader, ext)
 		if err != nil {
-			response.Success = false
+			response.Status = StatusFailed
 			response.Error = "Failed to roast CV: " + err.Error()
 			if err := s.sendWebhook(response); err != nil {
 				log.Printf("Failed to send webhook: %v", err)
@@ -225,16 +238,85 @@ func (s *Server) processCVHandler(c *gin.Context) {
 		response.Feedback = feedback
 	}
 
-	// send webhook for successful processing
+	c.JSON(http.StatusOK, response)
+}
+
+func (s *Server) coverLetterHandler(c *gin.Context) {
+	auth := c.GetHeader("Authorization")
+	expectedAuth := "Bearer " + os.Getenv("BURNISHED_WEB_API_KEY")
+	if auth != expectedAuth {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	// parse form
+	if err := c.Request.ParseMultipartForm(s.cfg.MaxFileSize); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse form: " + err.Error()})
+		return
+	}
+
+	documentID := c.PostForm("documentID")
+	jobDescription := c.PostForm("jobDescription")
+	if documentID == "" || jobDescription == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "documentID and jobDescription are required"})
+		return
+	}
+
+	file, _, err := c.Request.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No file provided"})
+		return
+	}
+	defer file.Close()
+
+	fileData, err := io.ReadAll(file)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file"})
+		return
+	}
+
+	coverURL, err := s.generateCoverLetter(documentID, fileData, jobDescription)
+	if err != nil {
+		log.Printf("Cover letter error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// respond + optionally send webhook
+	response := ProcessResponse{
+		DocumentID:      documentID,
+		Status:          StatusCompleted,
+		CoverLetterFile: coverURL,
+	}
 	if err := s.sendWebhook(response); err != nil {
 		log.Printf("Failed to send webhook: %v", err)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success":    true,
-		"message":    "Processing started",
-		"documentID": documentID,
-	})
+}
+
+func (s *Server) generateCoverLetter(documentID string, fileData []byte, jobDescription string) (string, error) {
+	if documentID == "" {
+		return "", fmt.Errorf("documentID is required")
+	}
+	if len(fileData) == 0 {
+		return "", fmt.Errorf("file data is empty")
+	}
+	if jobDescription == "" {
+		return "", fmt.Errorf("job description is required")
+	}
+	
+	coverLetter, err := ai.GenerateCoverLetter(fileData, jobDescription, s.cfg.GeminiAPIKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate cover letter: %w", err)
+	}
+
+	coverFilename := fmt.Sprintf("cover_letter_%s.txt", uuid.New().String())
+	coverURL, err := s.saveToLFS([]byte(coverLetter), coverFilename)
+	if err != nil {
+		return "", fmt.Errorf("failed to save cover letter: %w", err)
+	}
+
+	return coverURL, nil
 }
 
 func getContentType(ext string) string {

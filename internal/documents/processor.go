@@ -24,16 +24,13 @@ func (p *Processor) FormatForATS(file io.Reader, fileExt, jobDesc string) ([]byt
 
 	switch fileExt {
 	case ".pdf":
-		processor, err = NewPDFProcessor(p.config.PdfTemplate)
+		processor = NewPDFProcessor()
 	case ".docx":
-		processor, err = NewDOCXProcessor(p.config.DocxTemplate)
+		processor = NewDOCXProcessor()
 	default:
 		return nil, fmt.Errorf("unsupported file format: %s", fileExt)
 	}
 
-	if err != nil {
-		return nil, fmt.Errorf("initializing processor for %s: %w", fileExt, err)
-	}
 
 	// extract text from cv
 	text, err := processor.ExtractText(file)
@@ -62,15 +59,11 @@ func (p *Processor) RoastCV(file io.Reader, fileExt string) (string, error) {
 
 	switch fileExt {
 	case ".pdf":
-		processor, err = NewPDFProcessor(p.config.PdfTemplate)
+		processor = NewPDFProcessor()
 	case ".docx":
-		processor, err = NewDOCXProcessor(p.config.DocxTemplate)
+		processor = NewDOCXProcessor()
 	default:
 		return "", fmt.Errorf("unsupported file format: %s", fileExt)
-	}
-
-	if err != nil {
-		return "", fmt.Errorf("initializing processor for %s: %w", fileExt, err)
 	}
 
 	// extract text from cv
