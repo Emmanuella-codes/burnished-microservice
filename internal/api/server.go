@@ -14,7 +14,6 @@ import (
 
 	"github.com/Emmanuella-codes/burnished-microservice/internal/config"
 	"github.com/Emmanuella-codes/burnished-microservice/internal/documents"
-	"github.com/Emmanuella-codes/burnished-microservice/internal/supabase"
 
 	"github.com/gin-gonic/gin"
 )
@@ -57,9 +56,7 @@ func (s *Server) setupRoutes() {
 	{
 		api.GET("/health", s.healthHandler)
 		api.POST("/process", s.processCVHandler)
-		api.POST("/generate/cover-letter", s.coverLetterHandler)
 
-		api.POST("/upload", supabase.UploadToSupabase)
 	}
 	api.Use(authMiddleware())
 	{

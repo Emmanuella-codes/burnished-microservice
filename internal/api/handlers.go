@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	// "encoding/json"
 	"log"
 	"os"
 	"strings"
@@ -13,7 +14,7 @@ import (
 	"time"
 
 	"github.com/Emmanuella-codes/burnished-microservice/internal/ai"
-	"github.com/google/uuid"
+	"github.com/Emmanuella-codes/burnished-microservice/internal/dtos"
 
 	"github.com/gin-gonic/gin"
 )
@@ -34,33 +35,12 @@ type ProcessCVRequest struct {
 }
 
 type ProcessResponse struct {
-	DocumentID  		string  					`json:"documentID"`
-	Status 					ProcessingStatus 	`json:"status"`
-	FormattedFile   string 						`json:"formattedFile,omitempty"`
-  CoverLetterFile string 						`json:"coverLetter,omitempty"`
-  Feedback        string 						`json:"feedback,omitempty"`
-  Error           string 						`json:"error,omitempty"`
-}
-
-func (s *Server) saveToLFS(fileData []byte, filename string) (string, error) {
-	uploadDir := s.cfg.UploadDir
-	if err := os.MkdirAll(uploadDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create upload directory: %w", err)
-	}
-
-	filePath := filepath.Join(uploadDir, filename)
-	if err := os.WriteFile(filePath, fileData, 0644); err != nil {
-		return "", fmt.Errorf("failed to write file: %w", err)
-	}
-	
-	// generate a URL that can be used to access the file
-	baseURL := os.Getenv("BASE_URL")
-	if baseURL == "" {
-		baseURL = fmt.Sprintf("http://localhost:%s", s.cfg.Port)
-	}
-
-	fileURL := fmt.Sprintf("%s/files/%s", baseURL, filename)
-	return fileURL, nil
+	// DocumentID  			string  					`json:"documentID"`
+	Status 						ProcessingStatus 	`json:"status"`
+	FormattedResume   *dtos.Resume 			`json:"formattedResume,omitempty"`
+  CoverLetter 			string 						`json:"coverLetter,omitempty"`
+  Feedback        	string 						`json:"feedback,omitempty"`
+  Error           	string 						`json:"error,omitempty"`
 }
 
 func (s *Server) serveFileHandler(c *gin.Context) {
@@ -115,19 +95,11 @@ func (s *Server) processCVHandler(c *gin.Context) {
     return
 	}
 
-	documentID := c.PostForm("documentID")
-	log.Printf("Received documentID: %s", documentID)
-	if documentID == "" {
-		log.Printf("documentID is empty")
-		c.JSON(http.StatusBadRequest, gin.H{"error": "documentId is required"})
-		return
-	}
-
 	mode := c.PostForm("mode")
 	log.Printf("Received mode: %s", mode)
-	if mode != "roast" && mode != "format" {
+	if mode != "roast" && mode != "format" && mode != "letter" {
 		log.Printf("Invalid mode: %s", mode)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "mode must be 'roast' or 'format'"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "mode must be 'roast' or 'format' or 'letter'"})
 		return
 	}
 
@@ -167,28 +139,20 @@ func (s *Server) processCVHandler(c *gin.Context) {
 	}
 
 	// prepare webhook response
-	response := ProcessResponse{
-		DocumentID: documentID,
-		Status:     StatusCompleted,
-	}
+	var response ProcessResponse
+	response.Status = StatusCompleted
 
 	log.Println("starting ParseCV...")
-	sections, err := s.docFormatter.ParseCV(fileData)
-	if err != nil {
-		log.Printf("ParseCV failed: %v", err)
-		response.Error = fmt.Sprintf("Failed to parse CV: %v", err)
-		s.sendWebhook(response)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": response.Error})
-    return
-	}
 
 	// process based on mode
 	switch mode {
 	case "format":
-		processedFile, err := s.docFormatter.Format(sections, jobDescription)
+		fileReader := bytes.NewReader(fileData)
+		resume, err := s.docProc.FormatForATS(fileReader, ext, jobDescription)
 		if err != nil {
 			response.Status = StatusFailed
 			response.Error = "Failed to format CV: " + err.Error()
+			log.Printf("🟢 About to send JSON: %+v", response)
 			if err := s.sendWebhook(response); err != nil {
 				log.Printf("Failed to send webhook: %v", err)
 			}
@@ -196,31 +160,10 @@ func (s *Server) processCVHandler(c *gin.Context) {
 			return
 		}
 
-		filename := fmt.Sprintf("cv_%s_formatted%s", uuid.New().String(), ".pdf")
-		fileURL, err := s.saveToLFS(processedFile, filename)
-		if err != nil {
-			response.Status = StatusFailed
-			response.Error = "Failed to save formatted file: " + err.Error()
-			if err := s.sendWebhook(response); err != nil {
-				log.Printf("Failed to send webhook: %v", err)
-			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": response.Error})
-			return
-		}
-		response.FormattedFile = fileURL
+		response.FormattedResume = resume
 
-		// generate cover letter
-		coverLetter, err := ai.GenerateCoverLetter(fileData, jobDescription, s.cfg.GeminiAPIKey)
-		if err != nil {
-			log.Printf("Failed to generate cover letter: %v", err)
-		} else {
-			coverFilename := fmt.Sprintf("cover_letter_%s.txt", uuid.New().String())
-			coverURL, err := s.saveToLFS([]byte(coverLetter), coverFilename)
-			if err != nil {
-				log.Printf("Failed to save cover letter: %v", err)
-			} else {
-				response.CoverLetterFile = coverURL
-			}
+		if err := s.sendWebhook(response); err != nil {
+			log.Printf("Failed to send webhook: %v", err)
 		}
 
 	case "roast":
@@ -236,88 +179,32 @@ func (s *Server) processCVHandler(c *gin.Context) {
 			return
 		}
 		response.Feedback = feedback
-	}
 
-	c.JSON(http.StatusOK, response)
-}
-
-func (s *Server) coverLetterHandler(c *gin.Context) {
-	auth := c.GetHeader("Authorization")
-	expectedAuth := "Bearer " + os.Getenv("BURNISHED_WEB_API_KEY")
-	if auth != expectedAuth {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-
-	// parse form
-	if err := c.Request.ParseMultipartForm(s.cfg.MaxFileSize); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse form: " + err.Error()})
-		return
-	}
-
-	documentID := c.PostForm("documentID")
-	jobDescription := c.PostForm("jobDescription")
-	if documentID == "" || jobDescription == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "documentID and jobDescription are required"})
-		return
-	}
-
-	file, _, err := c.Request.FormFile("file")
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No file provided"})
-		return
-	}
-	defer file.Close()
-
-	fileData, err := io.ReadAll(file)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file"})
-		return
-	}
-
-	coverURL, err := s.generateCoverLetter(documentID, fileData, jobDescription)
-	if err != nil {
-		log.Printf("Cover letter error: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	// respond + optionally send webhook
-	response := ProcessResponse{
-		DocumentID:      documentID,
-		Status:          StatusCompleted,
-		CoverLetterFile: coverURL,
-	}
-	if err := s.sendWebhook(response); err != nil {
-		log.Printf("Failed to send webhook: %v", err)
-	}
-
-}
-
-func (s *Server) generateCoverLetter(documentID string, fileData []byte, jobDescription string) (string, error) {
-	if documentID == "" {
-		return "", fmt.Errorf("documentID is required")
-	}
-	if len(fileData) == 0 {
-		return "", fmt.Errorf("file data is empty")
-	}
-	if jobDescription == "" {
-		return "", fmt.Errorf("job description is required")
-	}
+		if err := s.sendWebhook(response); err != nil {
+			log.Printf("Failed to send webhook: %v", err)
+		}
 	
-	coverLetter, err := ai.GenerateCoverLetter(fileData, jobDescription, s.cfg.GeminiAPIKey)
-	if err != nil {
-		return "", fmt.Errorf("failed to generate cover letter: %w", err)
+	case "letter":
+		coverLetter, err := ai.GenerateCoverLetter(fileData, jobDescription, s.cfg.GeminiAPIKey)
+		if err != nil {
+			response.Status = StatusFailed
+			response.Error = fmt.Sprintf("Failed to generate cover letter: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": response.Error})
+			return
+		}
+
+		response.CoverLetter = coverLetter
+
+		if err := s.sendWebhook(response); err != nil {
+			log.Printf("Failed to send webhook: %v", err)
+		}
 	}
 
-	coverFilename := fmt.Sprintf("cover_letter_%s.txt", uuid.New().String())
-	coverURL, err := s.saveToLFS([]byte(coverLetter), coverFilename)
-	if err != nil {
-		return "", fmt.Errorf("failed to save cover letter: %w", err)
-	}
-
-	return coverURL, nil
+	log.Printf("Sending response for mode: %s", mode)
+	c.JSON(http.StatusOK, response)
+	log.Printf("Response sent successfully")
 }
+
 
 func getContentType(ext string) string {
 	switch ext {

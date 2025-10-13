@@ -3,9 +3,11 @@ package documents
 import (
 	"fmt"
 	"io"
+	"log"
 
 	"github.com/Emmanuella-codes/burnished-microservice/internal/ai"
 	"github.com/Emmanuella-codes/burnished-microservice/internal/config"
+	"github.com/Emmanuella-codes/burnished-microservice/internal/dtos"
 )
 
 type Processor struct {
@@ -18,7 +20,7 @@ func NewProcessor(cfg *config.Config) *Processor {
 	}
 }
 
-func (p *Processor) FormatForATS(file io.Reader, fileExt, jobDesc string) ([]byte, error) {
+func (p *Processor) FormatForATS(file io.Reader, fileExt, jobDesc string) (*dtos.Resume, error) {
 	var processor DocumentProcessor
 	var err error
 
@@ -31,26 +33,24 @@ func (p *Processor) FormatForATS(file io.Reader, fileExt, jobDesc string) ([]byt
 		return nil, fmt.Errorf("unsupported file format: %s", fileExt)
 	}
 
-
 	// extract text from cv
 	text, err := processor.ExtractText(file)
 	if err != nil {
 		return nil, fmt.Errorf("extracting text from %s: %w", fileExt, err)
 	}
 
-	// use AI to optimize the CV content
-	optimizedText, err := ai.FormatForATS(text, jobDesc, p.config.GeminiAPIKey)
+	log.Printf("Extracted text length: %d characters", len(text))
+    if len(text) == 0 {
+        return nil, fmt.Errorf("extracted text is empty")
+    }
+
+	// parse + optimize CV into structured JSON
+	resume, err := ai.ParseAndOptimizeCV(text, jobDesc, p.config.GeminiAPIKey)
 	if err != nil {
 		return nil, fmt.Errorf("optimizing CV for ATS: %w", err)
 	}
 
-	// create a new document with the optimized content
-	formattedDoc, err := processor.CreateFormattedDocument(optimizedText)
-	if err != nil {
-		return nil, fmt.Errorf("creating formatted %s document: %w", fileExt, err)
-	}
-
-	return formattedDoc, nil
+	return resume, nil
 }
 
 func (p *Processor) RoastCV(file io.Reader, fileExt string) (string, error) {
