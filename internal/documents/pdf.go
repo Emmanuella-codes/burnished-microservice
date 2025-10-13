@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log"
 
 	// "os/exec"
 	"strings"
@@ -23,6 +24,7 @@ func NewPDFProcessor() *PDFProcessor {
 func (p *PDFProcessor) ExtractText(file io.Reader) (string, error) {
 	fileBytes, err := io.ReadAll(file)
 	if err != nil {
+		log.Printf("[ExtractText] Failed to read file: %v", err)
 		return "", fmt.Errorf("reading PDF file: %w", err)
 	}
 
@@ -30,6 +32,7 @@ func (p *PDFProcessor) ExtractText(file io.Reader) (string, error) {
 	reader := bytes.NewReader(fileBytes)
 	pdfReader, err := pdf.NewReader(reader, int64(len(fileBytes)))
 	if err != nil {
+		log.Printf("[ExtractText] Failed to parse PDF: %v", err)
 		return "", fmt.Errorf("parsing PDF: %w", err)
 	}
 
