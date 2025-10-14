@@ -10,9 +10,20 @@ import (
 )
 
 func rateLimitMiddleware() gin.HandlerFunc {
+	// set limit to 9 requests per minute
 	rate := limiter.Rate{
 		Period: 1 * time.Minute,
-		Limit:	10,
+		Limit:	9,
+	}
+	store := memory.NewStore()
+	instance := limiter.New(store, rate)
+	return mgin.NewMiddleware(instance)
+}
+
+func dailyRateLimitMiddleware() gin.HandlerFunc {
+	rate := limiter.Rate{
+		Period: 24 * time.Hour,
+		Limit:  180, // Stay under 200 RPD limit
 	}
 	store := memory.NewStore()
 	instance := limiter.New(store, rate)

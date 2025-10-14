@@ -7,9 +7,11 @@ import (
 
 	"github.com/Emmanuella-codes/burnished-microservice/internal/api"
 	"github.com/Emmanuella-codes/burnished-microservice/internal/config"
+	"github.com/Emmanuella-codes/burnished-microservice/internal/utils"
 )
 
 func main() {
+	utils.InitLogger()
 	if err := godotenv.Load(); err != nil {
 		log.Printf("Warning: Failed to load .env file: %v", err)
 	}

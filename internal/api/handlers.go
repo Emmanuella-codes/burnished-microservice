@@ -14,7 +14,9 @@ import (
 	"time"
 
 	"github.com/Emmanuella-codes/burnished-microservice/internal/ai"
+	"github.com/Emmanuella-codes/burnished-microservice/internal/documents"
 	"github.com/Emmanuella-codes/burnished-microservice/internal/dtos"
+	"github.com/Emmanuella-codes/burnished-microservice/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -80,8 +82,8 @@ func (s *Server) processCVHandler(c *gin.Context) {
 	// authenticate request
 	auth := c.GetHeader("Authorization")
 	expectedAuth := "Bearer " + os.Getenv("BURNISHED_WEB_API_KEY")
-	log.Printf("Received auth: %s", auth)
-	log.Printf("Expected auth: %s", expectedAuth)
+	utils.LogInfo("Received auth", "auth", auth)
+
 	if auth != expectedAuth {
 		log.Printf("Auth failed")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
@@ -90,15 +92,15 @@ func (s *Server) processCVHandler(c *gin.Context) {
 
 	// parse multipart form
 	if err := c.Request.ParseMultipartForm(s.cfg.MaxFileSize); err != nil {
-		log.Printf("Failed to parse multipart form: %v", err)
+		utils.LogError("Failed to parse multipart form", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse form: " + err.Error()})
     return
 	}
 
 	mode := c.PostForm("mode")
-	log.Printf("Received mode: %s", mode)
+	utils.LogInfo("Received mode", "mode", mode)
 	if mode != "roast" && mode != "format" && mode != "letter" {
-		log.Printf("Invalid mode: %s", mode)
+		utils.LogInfo("Invalid mode", "mode", mode)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "mode must be 'roast' or 'format' or 'letter'"})
 		return
 	}
@@ -107,6 +109,10 @@ func (s *Server) processCVHandler(c *gin.Context) {
 	if mode == "format" && jobDescription == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "jobDescription is required for format mode"})
 		return
+	}
+	if mode == "letter" && jobDescription == "" {
+    c.JSON(http.StatusBadRequest, gin.H{"error": "jobDescription is required for letter mode"})
+    return
 	}
 
 	file, header, err := c.Request.FormFile("file")
@@ -152,9 +158,8 @@ func (s *Server) processCVHandler(c *gin.Context) {
 		if err != nil {
 			response.Status = StatusFailed
 			response.Error = "Failed to format CV: " + err.Error()
-			log.Printf("🟢 About to send JSON: %+v", response)
 			if err := s.sendWebhook(response); err != nil {
-				log.Printf("Failed to send webhook: %v", err)
+				utils.LogError("Failed to send webhook", err)
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": response.Error})
 			return
@@ -163,7 +168,7 @@ func (s *Server) processCVHandler(c *gin.Context) {
 		response.FormattedResume = resume
 
 		if err := s.sendWebhook(response); err != nil {
-			log.Printf("Failed to send webhook: %v", err)
+			utils.LogError("Failed to send webhook", err)
 		}
 
 	case "roast":
@@ -173,7 +178,7 @@ func (s *Server) processCVHandler(c *gin.Context) {
 			response.Status = StatusFailed
 			response.Error = "Failed to roast CV: " + err.Error()
 			if err := s.sendWebhook(response); err != nil {
-				log.Printf("Failed to send webhook: %v", err)
+				utils.LogError("Failed to send webhook", err)
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": response.Error})
 			return
@@ -181,14 +186,49 @@ func (s *Server) processCVHandler(c *gin.Context) {
 		response.Feedback = feedback
 
 		if err := s.sendWebhook(response); err != nil {
-			log.Printf("Failed to send webhook: %v", err)
+			utils.LogError("Failed to send webhook", err)
 		}
 	
 	case "letter":
-		coverLetter, err := ai.GenerateCoverLetter(fileData, jobDescription, s.cfg.GeminiAPIKey)
+		var processor documents.DocumentProcessor
+    switch ext {
+    case ".pdf":
+        processor = documents.NewPDFProcessor()
+    case ".docx":
+        processor = documents.NewDOCXProcessor()
+    default:
+        response.Status = StatusFailed
+        response.Error = fmt.Sprintf("Unsupported file format: %s", ext)
+        if err := s.sendWebhook(response); err != nil {
+          utils.LogError("Failed to send webhook", err)
+        }
+        c.JSON(http.StatusInternalServerError, gin.H{"error": response.Error})
+        return
+    }
+
+		fileReader := bytes.NewReader(fileData)
+		cvText, err := processor.ExtractText(fileReader)
+		if err != nil {
+        response.Status = StatusFailed
+        response.Error = fmt.Sprintf("Failed to extract text from CV: %v", err)
+        log.Printf("Text extraction failed: %v", err)
+        if err := s.sendWebhook(response); err != nil {
+          utils.LogError("Failed to send webhook", err)
+        }
+        c.JSON(http.StatusInternalServerError, gin.H{"error": response.Error})
+        return
+    }
+
+    log.Printf("Extracted %d characters from CV", len(cvText))
+
+		coverLetter, err := ai.GenerateCoverLetter(cvText, jobDescription, s.cfg.GeminiAPIKey)
 		if err != nil {
 			response.Status = StatusFailed
 			response.Error = fmt.Sprintf("Failed to generate cover letter: %v", err)
+			utils.LogError("Cover letter generation failed", err)
+			if err := s.sendWebhook(response); err != nil {
+				utils.LogError("Failed to send webhook", err)
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": response.Error})
 			return
 		}
@@ -200,9 +240,8 @@ func (s *Server) processCVHandler(c *gin.Context) {
 		}
 	}
 
-	log.Printf("Sending response for mode: %s", mode)
 	c.JSON(http.StatusOK, response)
-	log.Printf("Response sent successfully")
+	utils.LogInfo("Response sent successfully")
 }
 
 
