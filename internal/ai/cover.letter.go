@@ -2,10 +2,9 @@ package ai
 
 import "fmt"
 
-func GenerateCoverLetter(cvData []byte, jobDescription, apiKey string) (string, error) {
-	cvText := string(cvData)
+func GenerateCoverLetter(cvText, jobDescription, apiKey string) (string, error) {
 	if cvText == "" {
-		return "", fmt.Errorf("CV data is empty")
+		return "", fmt.Errorf("CV text is empty")
 	}
 	if jobDescription == "" {
 			return "", fmt.Errorf("job description is empty")
@@ -23,6 +22,7 @@ func GenerateCoverLetter(cvData []byte, jobDescription, apiKey string) (string, 
 	Candidate's CV:
 	%s
 	Please write a complete cover letter that the candidate can use or adapt.
+	Return ONLY the cover letter text, no markdown formatting, no code blocks.
 	`, jobDescription, cvText)
 
 	return  callGemini(prompt, apiKey)

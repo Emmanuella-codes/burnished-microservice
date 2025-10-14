@@ -8,11 +8,13 @@ require (
 	github.com/gin-gonic/gin v1.10.0
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/unidoc/unioffice v1.39.0
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
 require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
+	github.com/natefinch/lumberjack v2.0.0+incompatible // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/richardlehane/msoleps v1.0.3 // indirect
 	github.com/rogpeppe/go-internal v1.13.1 // indirect

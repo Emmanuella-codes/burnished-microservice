@@ -4,18 +4,16 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"log"
 
 	// "os/exec"
 	"strings"
 
+	"github.com/Emmanuella-codes/burnished-microservice/internal/utils"
 	"github.com/jung-kurt/gofpdf"
 	"github.com/ledongthuc/pdf"
 )
 
-type PDFProcessor struct {
-
-}
+type PDFProcessor struct {}
 
 func NewPDFProcessor() *PDFProcessor {
 	return &PDFProcessor{}
@@ -24,7 +22,7 @@ func NewPDFProcessor() *PDFProcessor {
 func (p *PDFProcessor) ExtractText(file io.Reader) (string, error) {
 	fileBytes, err := io.ReadAll(file)
 	if err != nil {
-		log.Printf("[ExtractText] Failed to read file: %v", err)
+		utils.LogError("ExtractText failed to read file", err)
 		return "", fmt.Errorf("reading PDF file: %w", err)
 	}
 
@@ -32,7 +30,7 @@ func (p *PDFProcessor) ExtractText(file io.Reader) (string, error) {
 	reader := bytes.NewReader(fileBytes)
 	pdfReader, err := pdf.NewReader(reader, int64(len(fileBytes)))
 	if err != nil {
-		log.Printf("[ExtractText] Failed to parse PDF: %v", err)
+		utils.LogError("ExtractText failed to parse PDF", err)
 		return "", fmt.Errorf("parsing PDF: %w", err)
 	}
 
