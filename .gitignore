@@ -25,3 +25,6 @@ go.work.sum
 /uploads
 
 *.log
+
+# Docker
+docker-compose.yml

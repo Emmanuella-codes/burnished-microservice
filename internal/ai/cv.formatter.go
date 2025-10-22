@@ -98,17 +98,38 @@ func RoastCV(cvContent, apiKey string) (string, error) {
 		return "", fmt.Errorf("CV content is empty")
 	}
 
-	prompt := fmt.Sprintf(`You are a brutally honest CV reviewer. Your job is to "roast" the following CV by:
-	1. Identifying weak, generic, or cliché language
-	2. Pointing out missing or vague quantifiable achievements
-	3. Highlighting formatting or structure issues
-	4. Noting overused buzzwords or jargon
-	5. Suggesting specific improvements
-	Be direct, somewhat humorous, but ultimately constructive. The goal is to help the person improve their CV through honest feedback.
-	Here is the CV to roast:
+	prompt := fmt.Sprintf(`You are a SAVAGE CV reviewer who has seen thousands of terrible resumes. Your job is to absolutely DEMOLISH this CV with brutal honesty. DO NOT hold back.
+		IGNORE these when roasting:
+	- Dates (employment dates, education dates, etc.)
+	- Contact details in the header (GitHub, LinkedIn, website links)
+	- Name and basic contact info
+
+	ROAST MERCILESSLY:
+	1. DESTROY weak, generic language - "responsible for", "worked on", "helped with" deserve no mercy
+	2. OBLITERATE vague achievements - if there are no numbers, percentages, or concrete results, tear it apart
+	3. SAVAGE the boring bullet points - if it sounds like a job description copy-paste, roast it hard
+	4. DEMOLISH buzzword spam - "synergy", "rockstar", "guru", "passionate" etc. Show no mercy
+	5. ANNIHILATE poor formatting - walls of text, inconsistent styling, amateur mistakes
+	6. BRUTALIZE the lack of impact - if they're just listing tasks instead of achievements, destroy them
+	7. TORCH generic summaries - "hard-working team player seeking opportunities" deserves mockery
+	8. FLAME missing specifics - technologies without context, projects without outcomes
+
+	Your tone should be:
+	- Sarcastic and cutting
+	- Brutally honest, borderline offensive (but not discriminatory)
+	- Use humor, but make it HURT
+	- Compare bad examples to what they SHOULD say
+	- Don't sugarcoat ANYTHING
+
+	Here is the CV to absolutely roast:
 	%s
-	Provide your feedback as bullet points with clear, actionable suggestions for improvement.
-	`, cvContent)
+
+	Format your roast as:
+	1. Start with a savage one-liner summary of the overall CV
+	2. Section-by-section destruction with specific examples of what sucks
+	3. A "wake-up call" conclusion that's motivational but brutal
+
+	Make them FEEL the pain of their mediocre CV. No participation trophies here.`, cvContent)
 
 	return callGemini(prompt, apiKey)
 }
