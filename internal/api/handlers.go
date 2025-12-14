@@ -170,6 +170,8 @@ func (s *Server) processCVHandler(c *gin.Context) {
 		if err := s.sendWebhook(response); err != nil {
 			utils.LogError("Failed to send webhook", err)
 		}
+		c.JSON(http.StatusOK, response)
+		utils.LogInfo("Response sent successfully")
 
 	case "roast":
 		fileReader := bytes.NewReader(fileData)
@@ -188,6 +190,8 @@ func (s *Server) processCVHandler(c *gin.Context) {
 		if err := s.sendWebhook(response); err != nil {
 			utils.LogError("Failed to send webhook", err)
 		}
+		c.JSON(http.StatusOK, response)
+		utils.LogInfo("Response sent successfully")
 	
 	case "letter":
 		var processor documents.DocumentProcessor
@@ -238,10 +242,12 @@ func (s *Server) processCVHandler(c *gin.Context) {
 		if err := s.sendWebhook(response); err != nil {
 			log.Printf("Failed to send webhook: %v", err)
 		}
+		c.JSON(http.StatusOK, response)
+		utils.LogInfo("Response sent successfully")
 	}
 
-	c.JSON(http.StatusOK, response)
-	utils.LogInfo("Response sent successfully")
+	// c.JSON(http.StatusOK, response)
+	// utils.LogInfo("Response sent successfully")
 }
 
 
