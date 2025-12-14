@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"time"
 )
 
 const (
-	geminiEndpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+	geminiEndpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 )
 
 type GeminiRequest struct {
@@ -39,7 +41,7 @@ func callGemini(prompt string, apiKey string) (string, error) {
 		return "", fmt.Errorf("prompt is empty")
 	}
 	if apiKey == "" {
-			return "", fmt.Errorf("API key is empty")
+		return "", fmt.Errorf("API key is empty")
 	}
 
 	requestBody := GeminiRequest{
@@ -58,6 +60,8 @@ func callGemini(prompt string, apiKey string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("marshaling request: %w", err)
 	}
+	
+	log.Printf("Request body size: %d bytes", len(jsonData))
 
 	req, err := http.NewRequest("POST", fmt.Sprintf("%s?key=%s", geminiEndpoint, apiKey), bytes.NewBuffer(jsonData))
 	if err != nil {
@@ -66,7 +70,7 @@ func callGemini(prompt string, apiKey string) (string, error) {
 
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 30 * time.Second} // ADD TIMEOUT
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("sending request to Gemini API: %w", err)
@@ -78,7 +82,10 @@ func callGemini(prompt string, apiKey string) (string, error) {
 		return "", fmt.Errorf("reading response: %w", err)
 	}
 
+	log.Printf("Gemini API response status: %d, body length: %d", resp.StatusCode, len(body))
+
 	if resp.StatusCode != http.StatusOK {
+		log.Printf("Gemini API error response: %s", string(body))
 		return "", fmt.Errorf("gemini API returned status %d: %s", resp.StatusCode, string(body))
 	}
 

@@ -43,7 +43,8 @@ func ParseAndOptimizeCV(cvContent, jobDescription, apiKey string) (*dtos.Resume,
 	6. Add missing but relevant skills from job description IF candidate has related experience
 	7. Enhance bullet points with impact and results
 	8. NEVER fabricate experience - only enhance existing content
-	9. Keep all information truthful and grounded in original resume
+	9. Rather than just listing tasks performed, emphasize the problems solved, value created and the impact of the work done
+	10. Keep all information truthful and grounded in original resume
 
 	Here is the job description:
 	%s
