@@ -7,13 +7,14 @@ import (
 )
 
 type Config struct {
-	Port 					string
-	GeminiAPIKey  string
-	DocxTemplate  string
-	PdfTemplate   string
-	MaxFileSize   int64
+	Port 						string
+	// GeminiAPIKey  string
+	DeepSeekAPIKey  string
+	DocxTemplate  	string
+	PdfTemplate   	string
+	MaxFileSize   	int64
 	// StorageBucket string
-	UploadDir     string
+	UploadDir     	string
 }
 
 func Load() (*Config, error) {
@@ -28,10 +29,16 @@ func Load() (*Config, error) {
 		cfg.Port = port
 	}
 
-	cfg.GeminiAPIKey = os.Getenv("GEMINI_API_KEY")
-	if cfg.GeminiAPIKey == "" {
-		return nil, fmt.Errorf("GEMINI_API_KEY environment variable is required")
+	// cfg.GeminiAPIKey = os.Getenv("GEMINI_API_KEY")
+	// if cfg.GeminiAPIKey == "" {
+	// 	return nil, fmt.Errorf("GEMINI_API_KEY environment variable is required")
+	// }
+
+	cfg.DeepSeekAPIKey = os.Getenv("DEEPSEEK_API_KEY")
+	if cfg.DeepSeekAPIKey == "" {
+		return nil, fmt.Errorf("DEEPSEEK_API_KEY environment variable is required")
 	}
+
 
 	if docxTemplate := os.Getenv("DOCX_TEMPLATE"); docxTemplate != "" {
 		cfg.DocxTemplate = docxTemplate

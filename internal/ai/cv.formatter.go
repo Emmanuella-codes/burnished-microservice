@@ -77,7 +77,7 @@ func ParseAndOptimizeCV(cvContent, jobDescription, apiKey string) (*dtos.Resume,
 
 	Return ONLY the optimized JSON:`, jobDescription, cvContent)
 
-	response, err := callGemini(prompt, apiKey)
+	response, err := callDeepSeek(prompt, apiKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to call AI: %w", err)
 	}
@@ -132,7 +132,7 @@ func RoastCV(cvContent, apiKey string) (string, error) {
 
 	Make them FEEL the pain of their mediocre CV. No participation trophies here.`, cvContent)
 
-	return callGemini(prompt, apiKey)
+	return callDeepSeek(prompt, apiKey)
 }
 
 func ValidateAndFillMissingSections(resume *dtos.Resume) {
