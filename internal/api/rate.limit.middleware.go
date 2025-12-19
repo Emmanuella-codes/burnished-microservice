@@ -19,13 +19,3 @@ func rateLimitMiddleware() gin.HandlerFunc {
 	instance := limiter.New(store, rate)
 	return mgin.NewMiddleware(instance)
 }
-
-func dailyRateLimitMiddleware() gin.HandlerFunc {
-	rate := limiter.Rate{
-		Period: 24 * time.Hour,
-		Limit:  180, // Stay under 200 RPD limit
-	}
-	store := memory.NewStore()
-	instance := limiter.New(store, rate)
-	return mgin.NewMiddleware(instance)
-}

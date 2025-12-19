@@ -225,7 +225,7 @@ func (s *Server) processCVHandler(c *gin.Context) {
 
     log.Printf("Extracted %d characters from CV", len(cvText))
 
-		coverLetter, err := ai.GenerateCoverLetter(cvText, jobDescription, s.cfg.GeminiAPIKey)
+		coverLetter, err := ai.GenerateCoverLetter(cvText, jobDescription, s.cfg.DeepSeekAPIKey)
 		if err != nil {
 			response.Status = StatusFailed
 			response.Error = fmt.Sprintf("Failed to generate cover letter: %v", err)

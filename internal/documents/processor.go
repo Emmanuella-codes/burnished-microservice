@@ -45,7 +45,7 @@ func (p *Processor) FormatForATS(file io.Reader, fileExt, jobDesc string) (*dtos
     }
 
 	// parse + optimize CV into structured JSON
-	resume, err := ai.ParseAndOptimizeCV(text, jobDesc, p.config.GeminiAPIKey)
+	resume, err := ai.ParseAndOptimizeCV(text, jobDesc, p.config.DeepSeekAPIKey)
 	if err != nil {
 		return nil, fmt.Errorf("optimizing CV for ATS: %w", err)
 	}
@@ -73,7 +73,7 @@ func (p *Processor) RoastCV(file io.Reader, fileExt string) (string, error) {
 	}
 
 	// use AI to critique the CV
-	feedback, err := ai.RoastCV(text, p.config.GeminiAPIKey)
+	feedback, err := ai.RoastCV(text, p.config.DeepSeekAPIKey)
 	if err != nil {
 		return "", fmt.Errorf("roasting CV: %w", err)
 	}

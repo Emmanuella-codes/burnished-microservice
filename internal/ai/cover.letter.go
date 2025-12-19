@@ -25,5 +25,5 @@ func GenerateCoverLetter(cvText, jobDescription, apiKey string) (string, error) 
 	Return ONLY the cover letter text, no markdown formatting, no code blocks.
 	`, jobDescription, cvText)
 
-	return  callGemini(prompt, apiKey)
+	return  callDeepSeek(prompt, apiKey)
 }
