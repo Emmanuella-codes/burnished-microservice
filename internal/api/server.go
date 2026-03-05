@@ -55,13 +55,10 @@ func (s *Server) setupRoutes() {
 	api.Use(loggingMiddleware(), rateLimitMiddleware())
 	{
 		api.GET("/health", s.healthHandler)
-		api.POST("/process", s.processCVHandler)
-
 	}
-	api.Use(authMiddleware())
-	{
-		api.GET("/files/:filename", s.serveFileHandler)
-	}
+	protected := api.Group("")
+	protected.Use(authMiddleware())
+	protected.POST("/process", s.processCVHandler)
 }
 
 func (s *Server) Start() error {
@@ -85,7 +82,7 @@ func (s *Server) Start() error {
 func (s *Server) sendWebhook(payload ProcessResponse) error {
 	webhookURL := os.Getenv("BURNISHED_WEB_WEBHOOK_URL")
 	if webhookURL == "" {
-		return fmt.Errorf("WEBHOOK_URL not configured")
+		return fmt.Errorf("BURNISHED_WEB_WEBHOOK_URL not configured")
 	}
 
 	body, err := json.Marshal(payload)
@@ -110,8 +107,8 @@ func (s *Server) sendWebhook(payload ProcessResponse) error {
 	log.Printf("Webhook response status: %d", res.StatusCode)
 	defer res.Body.Close()
 
-	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("webhook returned non-200 status: %d", res.StatusCode)
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return fmt.Errorf("webhook returned non-2xx status: %d", res.StatusCode)
 	}
 	return nil
 }

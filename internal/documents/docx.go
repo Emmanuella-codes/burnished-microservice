@@ -43,8 +43,7 @@ func (p *DOCXProcessor) ExtractText(file io.Reader) (string, error) {
 // CreateFormattedDocument creates a new DOCX from content.
 // If a templatePath was provided, it will clear and reuse it.
 func (p *DOCXProcessor) CreateFormattedDocument(content string) ([]byte, error) {
-	var doc *document.Document
-	var err error
+	doc := document.New()
 
 	// Split content by lines
 	lines := strings.Split(content, "\n")
@@ -59,7 +58,7 @@ func (p *DOCXProcessor) CreateFormattedDocument(content string) ([]byte, error) 
 
 	// Write to memory
 	buf := new(bytes.Buffer)
-	err = doc.Save(buf)
+	err := doc.Save(buf)
 	if err != nil {
 		return nil, fmt.Errorf("saving DOCX: %w", err)
 	}

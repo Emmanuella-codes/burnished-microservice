@@ -4,8 +4,6 @@ import (
 	"bytes"
 	// "encoding/json"
 	"log"
-	"os"
-	"strings"
 
 	"fmt"
 	"io"
@@ -29,72 +27,37 @@ const (
 )
 
 type ProcessCVRequest struct {
-	File          	[]byte  `form:"file"`
-  Filename      	string  `form:"filename"`
-	Mode				 		string  `json:"mode" binding:"required,oneof=roast format"`
-	JobDescription 	string  `json:"jobDescription"`
+	File           []byte `form:"file"`
+	Filename       string `form:"filename"`
+	Mode           string `json:"mode" binding:"required,oneof=roast format"`
+	JobDescription string `json:"jobDescription"`
 	// GenerateCoverLetter bool 	 `json:"generateCoverLetter"`
 }
 
 type ProcessResponse struct {
 	// DocumentID  			string  					`json:"documentID"`
-	Status 						ProcessingStatus 	`json:"status"`
-	FormattedResume   *dtos.Resume 			`json:"formattedResume,omitempty"`
-  CoverLetter 			string 						`json:"coverLetter,omitempty"`
-  Feedback        	string 						`json:"feedback,omitempty"`
-  Error           	string 						`json:"error,omitempty"`
-}
-
-func (s *Server) serveFileHandler(c *gin.Context) {
-	filename := filepath.Clean(c.Param("filename"))
-
-	// security check
-	if strings.Contains(filename, "..") || filepath.IsAbs(filename) {
-		c.AbortWithStatus(http.StatusForbidden)
-		return
-	}
-
-	uploadDir := s.cfg.UploadDir
-	filePath := filepath.Join(uploadDir, filename)
-
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
-		return
-	}
-
-	contentType := getContentType(filepath.Ext(filename))
-
-	c.Header("Content-Type", contentType)
-	c.Header("Content-Disposition", fmt.Sprintf("inline; filename=%s", filename))
-	c.File(filePath)
+	Status          ProcessingStatus `json:"status"`
+	FormattedResume *dtos.Resume     `json:"formattedResume,omitempty"`
+	CoverLetter     string           `json:"coverLetter,omitempty"`
+	Feedback        string           `json:"feedback,omitempty"`
+	Error           string           `json:"error,omitempty"`
 }
 
 func (s *Server) healthHandler(c *gin.Context) {
 	response := gin.H{
 		"status": "ok",
-		"time":		time.Now().Format(time.RFC3339),
+		"time":   time.Now().Format(time.RFC3339),
 	}
 
 	c.JSON(http.StatusOK, response)
 }
 
 func (s *Server) processCVHandler(c *gin.Context) {
-	// authenticate request
-	auth := c.GetHeader("Authorization")
-	expectedAuth := "Bearer " + os.Getenv("BURNISHED_WEB_API_KEY")
-	utils.LogInfo("Received auth", "auth", auth)
-
-	if auth != expectedAuth {
-		log.Printf("Auth failed")
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-
 	// parse multipart form
 	if err := c.Request.ParseMultipartForm(s.cfg.MaxFileSize); err != nil {
 		utils.LogError("Failed to parse multipart form", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse form: " + err.Error()})
-    return
+		return
 	}
 
 	mode := c.PostForm("mode")
@@ -111,8 +74,8 @@ func (s *Server) processCVHandler(c *gin.Context) {
 		return
 	}
 	if mode == "letter" && jobDescription == "" {
-    c.JSON(http.StatusBadRequest, gin.H{"error": "jobDescription is required for letter mode"})
-    return
+		c.JSON(http.StatusBadRequest, gin.H{"error": "jobDescription is required for letter mode"})
+		return
 	}
 
 	file, header, err := c.Request.FormFile("file")
@@ -132,7 +95,7 @@ func (s *Server) processCVHandler(c *gin.Context) {
 	// check file size
 	if header.Size > s.cfg.MaxFileSize {
 		c.JSON(http.StatusBadRequest, gin.H{
-				"error": fmt.Sprintf("File size exceeds limit: %d bytes", s.cfg.MaxFileSize),
+			"error": fmt.Sprintf("File size exceeds limit: %d bytes", s.cfg.MaxFileSize),
 		})
 		return
 	}
@@ -192,38 +155,38 @@ func (s *Server) processCVHandler(c *gin.Context) {
 		}
 		c.JSON(http.StatusOK, response)
 		utils.LogInfo("Response sent successfully")
-	
+
 	case "letter":
 		var processor documents.DocumentProcessor
-    switch ext {
-    case ".pdf":
-        processor = documents.NewPDFProcessor()
-    case ".docx":
-        processor = documents.NewDOCXProcessor()
-    default:
-        response.Status = StatusFailed
-        response.Error = fmt.Sprintf("Unsupported file format: %s", ext)
-        if err := s.sendWebhook(response); err != nil {
-          utils.LogError("Failed to send webhook", err)
-        }
-        c.JSON(http.StatusInternalServerError, gin.H{"error": response.Error})
-        return
-    }
+		switch ext {
+		case ".pdf":
+			processor = documents.NewPDFProcessor()
+		case ".docx":
+			processor = documents.NewDOCXProcessor()
+		default:
+			response.Status = StatusFailed
+			response.Error = fmt.Sprintf("Unsupported file format: %s", ext)
+			if err := s.sendWebhook(response); err != nil {
+				utils.LogError("Failed to send webhook", err)
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": response.Error})
+			return
+		}
 
 		fileReader := bytes.NewReader(fileData)
 		cvText, err := processor.ExtractText(fileReader)
 		if err != nil {
-        response.Status = StatusFailed
-        response.Error = fmt.Sprintf("Failed to extract text from CV: %v", err)
-        log.Printf("Text extraction failed: %v", err)
-        if err := s.sendWebhook(response); err != nil {
-          utils.LogError("Failed to send webhook", err)
-        }
-        c.JSON(http.StatusInternalServerError, gin.H{"error": response.Error})
-        return
-    }
+			response.Status = StatusFailed
+			response.Error = fmt.Sprintf("Failed to extract text from CV: %v", err)
+			log.Printf("Text extraction failed: %v", err)
+			if err := s.sendWebhook(response); err != nil {
+				utils.LogError("Failed to send webhook", err)
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": response.Error})
+			return
+		}
 
-    log.Printf("Extracted %d characters from CV", len(cvText))
+		log.Printf("Extracted %d characters from CV", len(cvText))
 
 		coverLetter, err := ai.GenerateCoverLetter(cvText, jobDescription, s.cfg.DeepSeekAPIKey)
 		if err != nil {
@@ -244,22 +207,5 @@ func (s *Server) processCVHandler(c *gin.Context) {
 		}
 		c.JSON(http.StatusOK, response)
 		utils.LogInfo("Response sent successfully")
-	}
-
-	// c.JSON(http.StatusOK, response)
-	// utils.LogInfo("Response sent successfully")
-}
-
-
-func getContentType(ext string) string {
-	switch ext {
-	case ".pdf":
-		return "application/pdf"
-	case ".docx":
-		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-	case ".txt":
-    return "text/plain"
-	default:
-		return "application/octet-stream"
 	}
 }
