@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -11,6 +12,10 @@ import (
 var Logger *slog.Logger
 
 func InitLogger() {
+	if err := os.MkdirAll("logs", 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create logs directory: %v\n", err)
+	}
+
 	rotatingFile := &lumberjack.Logger{
 		Filename:   "logs/app.log",
 		MaxSize:    20,
