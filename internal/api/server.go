@@ -52,11 +52,10 @@ func NewServer(cfg *config.Config) *Server {
 }
 
 func (s *Server) setupRoutes() {
+	s.router.GET("/health", s.healthHandler)
+	
 	api := s.router.Group("/api/v1")
 	api.Use(loggingMiddleware(), rateLimitMiddleware())
-	{
-		api.GET("/health", s.healthHandler)
-	}
 	protected := api.Group("")
 	protected.Use(authMiddleware())
 	protected.POST("/process", s.processCVHandler)
