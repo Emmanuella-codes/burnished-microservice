@@ -2,3 +2,13 @@
 Dockerfile
 docker-compose.yml
 .env
+logs/
+tmp/
+dist/
+bin/
+*.log
+*.out
+*.test
+.DS_Store
+.idea/
+.vscode/
